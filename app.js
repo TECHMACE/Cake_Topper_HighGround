@@ -7,20 +7,20 @@ const MM_PER_IN = 25.4;
 const FONT_LIBRARY = {
   lilita: {
     name: "Lilita One",
-    url: "https://raw.githubusercontent.com/google/fonts/main/ofl/lilitaone/LilitaOne-Regular.ttf",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/lilitaone/LilitaOne-Regular.ttf",
   },
   bowlby: {
     name: "Bowlby One SC",
-    url: "https://raw.githubusercontent.com/google/fonts/main/ofl/bowlbyonesc/BowlbyOneSC-Regular.ttf",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/bowlbyonesc/BowlbyOneSC-Regular.ttf",
   },
   fredoka: {
     name: "Fredoka Bold",
-    url: "https://raw.githubusercontent.com/google/fonts/main/ofl/fredoka/Fredoka%5Bwght%5D.ttf",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/fredoka/Fredoka%5Bwght%5D.ttf",
     variationWeight: 600,
   },
   "great-vibes": {
     name: "Great Vibes",
-    url: "https://raw.githubusercontent.com/google/fonts/main/ofl/greatvibes/GreatVibes-Regular.ttf",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/greatvibes/GreatVibes-Regular.ttf",
   },
 };
 
@@ -82,6 +82,10 @@ const ui = {
   supportThicknessValue: document.getElementById("supportThicknessValue"),
   targetWidthValue: document.getElementById("targetWidthValue"),
   iconScaleValue: document.getElementById("iconScaleValue"),
+  previewOverlay: document.getElementById("previewOverlay"),
+  progressFill: document.getElementById("progressFill"),
+  previewStatusText: document.getElementById("previewStatusText"),
+  previewStatusSubtext: document.getElementById("previewStatusSubtext"),
 };
 
 const scene = {
@@ -97,6 +101,7 @@ const scene = {
 };
 
 const tool = new paper.Tool();
+let fontLoadRequestId = 0;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -135,6 +140,19 @@ function setStatus(element, message, tone) {
   }
 
   element.classList.add("neutral");
+}
+
+function setPreviewOverlay(visible, title, detail, progress = null) {
+  ui.previewOverlay.classList.toggle("hidden", !visible);
+  if (title) {
+    ui.previewStatusText.textContent = title;
+  }
+  if (detail) {
+    ui.previewStatusSubtext.textContent = detail;
+  }
+  if (typeof progress === "number") {
+    ui.progressFill.style.width = `${clamp(progress, 4, 100)}%`;
+  }
 }
 
 function updateReadouts() {
@@ -176,42 +194,75 @@ function clearCanvas() {
 function loadFont(fontKey) {
   const fontMeta = FONT_LIBRARY[fontKey];
   return new Promise((resolve, reject) => {
-    opentype.load(fontMeta.url, (error, font) => {
-      if (error) {
-        reject(error);
+    const request = new XMLHttpRequest();
+    request.open("GET", fontMeta.url, true);
+    request.responseType = "arraybuffer";
+    request.timeout = 12000;
+
+    request.onprogress = (event) => {
+      if (!event.lengthComputable) {
+        setPreviewOverlay(true, `Loading ${fontMeta.name}…`, "Downloading font outlines.", 42);
+        return;
+      }
+      const percent = 12 + (event.loaded / event.total) * 56;
+      setPreviewOverlay(true, `Loading ${fontMeta.name}…`, "Downloading font outlines.", percent);
+    };
+
+    request.onload = () => {
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(`Font request failed with status ${request.status}`));
         return;
       }
 
-      if (
-        fontMeta.variationWeight &&
-        typeof font.variation?.set === "function" &&
-        font.tables?.fvar?.axes?.some((axis) => axis.tag === "wght")
-      ) {
-        font.variation.set({ wght: fontMeta.variationWeight });
+      try {
+        const font = opentype.parse(request.response);
+        if (
+          fontMeta.variationWeight &&
+          typeof font.variation?.set === "function" &&
+          font.tables?.fvar?.axes?.some((axis) => axis.tag === "wght")
+        ) {
+          font.variation.set({ wght: fontMeta.variationWeight });
+        }
+        resolve(font);
+      } catch (error) {
+        reject(error);
       }
+    };
 
-      resolve(font);
-    });
+    request.onerror = () => reject(new Error("Network error while loading font"));
+    request.ontimeout = () => reject(new Error("Timed out while loading font"));
+    request.send();
   });
 }
 
 async function ensureFont(fontKey) {
+  const requestId = ++fontLoadRequestId;
   if (fontCache.has(fontKey)) {
     scene.activeFont = fontCache.get(fontKey);
     setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
+    setPreviewOverlay(false);
     return scene.activeFont;
   }
 
   setStatus(ui.fontStatus, `Loading ${FONT_LIBRARY[fontKey].name}...`);
+  setPreviewOverlay(true, `Loading ${FONT_LIBRARY[fontKey].name}…`, "Downloading font outlines.", 18);
   try {
     const font = await loadFont(fontKey);
+    if (requestId !== fontLoadRequestId) {
+      return scene.activeFont;
+    }
     fontCache.set(fontKey, font);
     scene.activeFont = font;
     setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
+    setPreviewOverlay(true, "Building preview…", "Welding outlines into a single cut shape.", 82);
     return font;
   } catch (error) {
+    if (requestId !== fontLoadRequestId) {
+      return scene.activeFont;
+    }
     scene.activeFont = null;
-    setStatus(ui.fontStatus, "Font load failed", "error");
+    setStatus(ui.fontStatus, "Font load failed, using fallback preview", "warn");
+    setPreviewOverlay(true, "Font load failed", "Showing fallback preview so you can keep working.", 100);
     return null;
   }
 }
@@ -350,7 +401,7 @@ function findExteriorPaths(item) {
 }
 
 function connectDetachedIslands(item, thickness) {
-  let working = item.clone({ insert: false });
+  let working = item.clone(false);
   let bridgesAdded = 0;
 
   while (true) {
@@ -431,7 +482,37 @@ function buildLineGlyphs(lineText, baselineY) {
 
 function buildTextArtwork() {
   if (!scene.activeFont) {
-    return null;
+    const fallbackLines = (state.message || "Happy Birthday")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!fallbackLines.length) {
+      return null;
+    }
+
+    const fallbackItems = [];
+    const lineStep = state.fontSize * (state.lineHeight / 100);
+    const centerOffset = (fallbackLines.length - 1) / 2;
+
+    fallbackLines.forEach((line, index) => {
+      const text = new paper.PointText({
+        point: new paper.Point(0, (index - centerOffset) * lineStep),
+        content: line,
+        justification: "center",
+        fontFamily: "Georgia",
+        fontSize: state.fontSize,
+        fillColor: "#1d130d",
+        insert: false,
+      });
+      const path = text.toPath();
+      text.remove();
+      if (path) {
+        fallbackItems.push(path);
+      }
+    });
+
+    return unionItems(fallbackItems);
   }
 
   const lines = (state.message || "Happy Birthday")
@@ -494,8 +575,19 @@ function buildFrame(textBounds, thickness) {
     return null;
   }
 
-  const outer = textBounds.expand(62);
-  const inner = outer.expand(-thickness * 1.35);
+  const outer = new paper.Rectangle(
+    textBounds.x - 62,
+    textBounds.y - 62,
+    textBounds.width + 124,
+    textBounds.height + 124
+  );
+  const innerInset = thickness * 1.35;
+  const inner = new paper.Rectangle(
+    outer.x + innerInset,
+    outer.y + innerInset,
+    Math.max(outer.width - innerInset * 2, thickness * 2),
+    Math.max(outer.height - innerInset * 2, thickness * 2)
+  );
   const ellipse = new paper.Path.Ellipse({
     rectangle: outer,
     insert: false,
@@ -512,7 +604,7 @@ function buildFrame(textBounds, thickness) {
 
   if (state.frameStyle === "scallop") {
     const orbit = new paper.Path.Ellipse({
-      rectangle: outer.expand(18),
+      rectangle: new paper.Rectangle(outer.x - 18, outer.y - 18, outer.width + 36, outer.height + 36),
       insert: false,
     });
     const scallops = [];
@@ -618,7 +710,7 @@ function buildIconArtwork(snapTarget) {
     state.icons[index].x = snappedCenter.x;
     state.icons[index].y = snappedCenter.y;
     shape.position = snappedCenter;
-    weldedShapes.push(shape.clone({ insert: false }));
+    weldedShapes.push(shape.clone(false));
 
     shape.fillColor = "rgba(47, 93, 125, 0.28)";
     shape.strokeColor = "#2f5d7d";
@@ -795,6 +887,59 @@ function updateConnectionStatus(islandCount, bridgesAdded) {
   setStatus(ui.connectionStatus, `${islandCount} disconnected island(s) detected`, "warn");
 }
 
+function thicknessInMillimeters(bounds, pixelThickness) {
+  if (!bounds || !bounds.width) {
+    return 0;
+  }
+  return (pixelThickness / bounds.width) * state.targetWidth * MM_PER_IN;
+}
+
+function assessCutReadiness(bounds, islandCount) {
+  if (!bounds) {
+    return { tone: "warn", message: "No topper geometry to assess" };
+  }
+
+  if (islandCount > 0) {
+    return { tone: "warn", message: "Disconnected cut islands remain" };
+  }
+
+  const connectorMm = thicknessInMillimeters(bounds, state.supportThickness);
+  if (connectorMm < 2) {
+    return { tone: "warn", message: `Fragile connectors at ${connectorMm.toFixed(1)} mm` };
+  }
+
+  if (!state.stickCount && !state.supportBar) {
+    return { tone: "warn", message: "No cake support enabled" };
+  }
+
+  if (connectorMm < 3) {
+    return { tone: "warn", message: `Usable but light at ${connectorMm.toFixed(1)} mm` };
+  }
+
+  return { tone: "ok", message: `Cut ready at ${connectorMm.toFixed(1)} mm minimum connector width` };
+}
+
+function buildFrameConnectors(textArtwork, frameArtwork, thickness) {
+  if (!textArtwork || !frameArtwork) {
+    return null;
+  }
+
+  const connectorWidth = Math.max(thickness * 0.82, 8);
+  const textBounds = textArtwork.bounds;
+  const targets = [
+    new paper.Point(textBounds.left, textBounds.center.y),
+    new paper.Point(textBounds.right, textBounds.center.y),
+  ];
+
+  const connectors = targets.map((target) => {
+    const textPoint = textArtwork.getNearestPoint(target);
+    const framePoint = frameArtwork.getNearestPoint(textPoint);
+    return roundedSegment(textPoint, framePoint, connectorWidth);
+  });
+
+  return unionItems(connectors);
+}
+
 function renderFallback(message) {
   clearCanvas();
   new paper.PointText({
@@ -808,69 +953,84 @@ function renderFallback(message) {
 }
 
 function renderScene() {
-  clearCanvas();
+  try {
+    clearCanvas();
 
-  const textArtwork = buildTextArtwork();
-  if (!textArtwork) {
-    renderFallback("Unable to build text outlines.");
-    updatePhysicalSize(null);
-    updateConnectionStatus(0, 0);
-    return;
+    const textArtwork = buildTextArtwork();
+    if (!textArtwork) {
+      renderFallback("Unable to build text outlines.");
+      updatePhysicalSize(null);
+      updateConnectionStatus(0, 0);
+      setPreviewOverlay(false);
+      return;
+    }
+
+    fitItemIntoView(textArtwork);
+    const textBounds = textArtwork.bounds.clone();
+    const frameArtwork = buildFrame(textBounds, state.supportThickness);
+    const supports = buildSupports(textBounds);
+    const frameConnectors = buildFrameConnectors(textArtwork, frameArtwork, state.supportThickness);
+    const snapBase = unionItems(
+      [textArtwork.clone(false), frameArtwork?.clone(false), frameConnectors?.clone(false), supports.welded?.clone(false)].filter(Boolean)
+    );
+
+    ensureIcons(textBounds);
+    const iconArtwork = buildIconArtwork(snapBase);
+    snapBase?.remove();
+
+    const weldInputs = [textArtwork];
+    if (frameArtwork) {
+      weldInputs.push(frameArtwork);
+    }
+    if (frameConnectors) {
+      weldInputs.push(frameConnectors);
+    }
+    if (supports.welded && state.weldSupports) {
+      weldInputs.push(supports.welded);
+    }
+    if (iconArtwork.weldedIcons) {
+      weldInputs.push(iconArtwork.weldedIcons);
+    }
+
+    let welded = unionItems(weldInputs);
+    let islandCount = Math.max(findExteriorPaths(welded).length - 1, 0);
+    let bridgesAdded = 0;
+
+    if (state.autoBridgeIslands && islandCount > 0) {
+      const bridged = connectDetachedIslands(welded, Math.max(state.supportThickness * 0.72, 7));
+      welded.remove();
+      welded = bridged.item;
+      bridgesAdded = bridged.bridgesAdded;
+      islandCount = Math.max(findExteriorPaths(welded).length - 1, 0);
+    }
+
+    scene.artworkForExport = welded.clone(false);
+    scene.silhouettePreview = welded;
+
+    welded.fillColor = "#1d130d";
+    welded.strokeColor = null;
+    supports.guides.insertBelow(welded);
+    scene.guideLayer = supports.guides;
+
+    if (!state.weldSupports && supports.welded) {
+      supports.welded.fillColor = "rgba(29, 19, 13, 0.24)";
+      supports.welded.insertAbove(supports.guides);
+    }
+
+    drawAnchorHandles();
+    drawIcons(iconArtwork.draggableIcons);
+    updatePhysicalSize(scene.artworkForExport.bounds);
+    updateConnectionStatus(islandCount, bridgesAdded);
+    const readiness = assessCutReadiness(scene.artworkForExport.bounds, islandCount);
+    setStatus(ui.connectionStatus, `${ui.connectionStatus.textContent} • ${readiness.message}`, readiness.tone);
+    setPreviewOverlay(false);
+    paper.view.update();
+  } catch (error) {
+    console.error(error);
+    setStatus(ui.connectionStatus, "Preview error", "error");
+    setPreviewOverlay(true, "Preview failed", error.message || "A browser-side rendering error occurred.", 100);
+    renderFallback("Preview failed. See status above.");
   }
-
-  fitItemIntoView(textArtwork);
-  const textBounds = textArtwork.bounds.clone();
-  const frameArtwork = buildFrame(textBounds, state.supportThickness);
-  const supports = buildSupports(textBounds);
-  const snapBase = unionItems(
-    [textArtwork.clone({ insert: false }), frameArtwork?.clone({ insert: false }), supports.welded?.clone({ insert: false })].filter(Boolean)
-  );
-
-  ensureIcons(textBounds);
-  const iconArtwork = buildIconArtwork(snapBase);
-  snapBase?.remove();
-
-  const weldInputs = [textArtwork];
-  if (frameArtwork) {
-    weldInputs.push(frameArtwork);
-  }
-  if (supports.welded && state.weldSupports) {
-    weldInputs.push(supports.welded);
-  }
-  if (iconArtwork.weldedIcons) {
-    weldInputs.push(iconArtwork.weldedIcons);
-  }
-
-  let welded = unionItems(weldInputs);
-  let islandCount = Math.max(findExteriorPaths(welded).length - 1, 0);
-  let bridgesAdded = 0;
-
-  if (state.autoBridgeIslands && islandCount > 0) {
-    const bridged = connectDetachedIslands(welded, Math.max(state.supportThickness * 0.72, 7));
-    welded.remove();
-    welded = bridged.item;
-    bridgesAdded = bridged.bridgesAdded;
-    islandCount = Math.max(findExteriorPaths(welded).length - 1, 0);
-  }
-
-  scene.artworkForExport = welded.clone({ insert: false });
-  scene.silhouettePreview = welded;
-
-  welded.fillColor = "#1d130d";
-  welded.strokeColor = null;
-  supports.guides.insertBelow(welded);
-  scene.guideLayer = supports.guides;
-
-  if (!state.weldSupports && supports.welded) {
-    supports.welded.fillColor = "rgba(29, 19, 13, 0.24)";
-    supports.welded.insertAbove(supports.guides);
-  }
-
-  drawAnchorHandles();
-  drawIcons(iconArtwork.draggableIcons);
-  updatePhysicalSize(scene.artworkForExport.bounds);
-  updateConnectionStatus(islandCount, bridgesAdded);
-  paper.view.update();
 }
 
 function buildExportSvg() {
@@ -878,7 +1038,7 @@ function buildExportSvg() {
     return null;
   }
 
-  const exportItem = scene.artworkForExport.clone({ insert: false });
+  const exportItem = scene.artworkForExport.clone(false);
   const scale = (state.targetWidth * PX_PER_IN) / exportItem.bounds.width;
   exportItem.scale(scale);
   exportItem.translate(new paper.Point(-exportItem.bounds.left + 12, -exportItem.bounds.top + 12));
@@ -995,6 +1155,11 @@ tool.onMouseUp = () => {
   scene.dragOffset = null;
 };
 
+window.addEventListener("error", (event) => {
+  setStatus(ui.connectionStatus, "Preview error", "error");
+  setPreviewOverlay(true, "Preview failed", event.message || "A browser-side error occurred.", 100);
+});
+
 function bindInput(element, stateKey, transformer = Number) {
   element.addEventListener("input", () => {
     state[stateKey] = transformer(element.value);
@@ -1011,6 +1176,8 @@ function bindEvents() {
 
   ui.fontSelect.addEventListener("change", async () => {
     state.fontKey = ui.fontSelect.value;
+    scene.activeFont = null;
+    renderScene();
     await ensureFont(state.fontKey);
     renderScene();
   });
@@ -1070,6 +1237,7 @@ function bindEvents() {
 async function initialize() {
   syncControlsFromState();
   bindEvents();
+  renderScene();
   await ensureFont(state.fontKey);
   renderScene();
 }
