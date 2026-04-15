@@ -105,6 +105,7 @@ const scene = {
 
 const tool = new paper.Tool();
 let fontLoadRequestId = 0;
+let overlayTimeoutId = null;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -146,7 +147,13 @@ function setStatus(element, message, tone) {
 }
 
 function setPreviewOverlay(visible, title, detail, progress = null) {
+  if (overlayTimeoutId) {
+    window.clearTimeout(overlayTimeoutId);
+    overlayTimeoutId = null;
+  }
+
   ui.previewOverlay.classList.toggle("hidden", !visible);
+  ui.previewOverlay.setAttribute("aria-hidden", visible ? "false" : "true");
   if (title) {
     ui.previewStatusText.textContent = title;
   }
@@ -155,6 +162,16 @@ function setPreviewOverlay(visible, title, detail, progress = null) {
   }
   if (typeof progress === "number") {
     ui.progressFill.style.width = `${clamp(progress, 4, 100)}%`;
+  }
+
+  if (visible) {
+    const isPersistentState = /failed|error/i.test(title || "") || /failed|error/i.test(detail || "");
+    if (!isPersistentState) {
+      overlayTimeoutId = window.setTimeout(() => {
+        ui.previewOverlay.classList.add("hidden");
+        ui.previewOverlay.setAttribute("aria-hidden", "true");
+      }, 900);
+    }
   }
 }
 
@@ -273,8 +290,8 @@ async function ensureFont(fontKey) {
     return scene.activeFont;
   }
 
-  setStatus(ui.fontStatus, `Loading ${FONT_LIBRARY[fontKey].name}...`);
-  setPreviewOverlay(true, `Loading ${FONT_LIBRARY[fontKey].name}…`, "Downloading font outlines.", 18);
+  setStatus(ui.fontStatus, `Loading ${FONT_LIBRARY[fontKey].name}...`, "warn");
+  setPreviewOverlay(true, `Loading ${FONT_LIBRARY[fontKey].name}…`, "Preview stays usable while font loads.", 18);
   try {
     const font = await withTimeout(loadFont(fontKey), 3500, "Remote font load took too long");
     if (requestId !== fontLoadRequestId) {
@@ -1461,6 +1478,7 @@ function bindEvents() {
 async function initialize() {
   syncControlsFromState();
   bindEvents();
+  setPreviewOverlay(false);
   renderScene();
   await ensureFont(state.fontKey);
   renderScene();

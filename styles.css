@@ -301,6 +301,7 @@ small {
   background: rgba(255, 248, 239, 0.82);
   backdrop-filter: blur(4px);
   z-index: 2;
+  pointer-events: none;
   transition: opacity 180ms ease, visibility 180ms ease;
 }
 
