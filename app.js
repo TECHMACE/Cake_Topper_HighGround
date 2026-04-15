@@ -44,8 +44,7 @@ const FONT_LIBRARY = {
   },
   fredoka: {
     name: "Fredoka Bold",
-    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/fredoka/Fredoka%5Bwght%5D.ttf",
-    variationWeight: 600,
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/fredoka/static/Fredoka-Bold.ttf",
   },
   "great-vibes": {
     name: "Great Vibes",
@@ -67,6 +66,7 @@ const DEFAULT_STATE = {
   supportThickness: 12,
   supportBar: true,
   frameStyle: "none",
+  anchorSpread: 18,
   targetWidth: 7,
   autoBridgeIslands: true,
   weldSupports: true,
@@ -93,6 +93,7 @@ const ui = {
   stickTip: document.getElementById("stickTip"),
   stickLength: document.getElementById("stickLength"),
   supportThickness: document.getElementById("supportThickness"),
+  anchorSpread: document.getElementById("anchorSpread"),
   supportBar: document.getElementById("supportBar"),
   frameStyle: document.getElementById("frameStyle"),
   targetWidth: document.getElementById("targetWidth"),
@@ -117,10 +118,12 @@ const ui = {
   curveAmountValue: document.getElementById("curveAmountValue"),
   stickLengthValue: document.getElementById("stickLengthValue"),
   supportThicknessValue: document.getElementById("supportThicknessValue"),
+  anchorSpreadValue: document.getElementById("anchorSpreadValue"),
   targetWidthValue: document.getElementById("targetWidthValue"),
   iconScaleValue: document.getElementById("iconScaleValue"),
   previewMeta: document.getElementById("previewMeta"),
   iconSelectionStatus: document.getElementById("iconSelectionStatus"),
+  connectionDetail: document.getElementById("connectionDetail"),
 };
 
 const scene = {
@@ -134,6 +137,7 @@ const scene = {
   anchorPositions: [],
   dragTarget: null,
   dragOffset: null,
+  lastSuccessfulFontKey: null,
 };
 
 const tool = new paper.Tool();
@@ -152,7 +156,11 @@ function setFontStatus(message, tone) {
 }
 
 function setConnectionStatus(message, tone) {
-  setStatusGroup([ui.connectionStatus, ui.topConnectionStatus], message, tone);
+  const shortMessage = message.split(" • ")[0];
+  setStatusGroup([ui.connectionStatus, ui.topConnectionStatus], shortMessage, tone);
+  if (ui.connectionDetail) {
+    ui.connectionDetail.textContent = message;
+  }
 }
 
 function updateSelectedIconStatus() {
@@ -217,6 +225,7 @@ function updateReadouts() {
   ui.curveAmountValue.textContent = `${state.curveAmount} px`;
   ui.stickLengthValue.textContent = `${state.stickLength} px`;
   ui.supportThicknessValue.textContent = `${state.supportThickness} px`;
+  ui.anchorSpreadValue.textContent = `${state.anchorSpread}%`;
   ui.targetWidthValue.textContent = formatInches(state.targetWidth);
   ui.iconScaleValue.textContent = `${state.iconScale} px`;
 }
@@ -233,6 +242,7 @@ function syncControlsFromState() {
   ui.stickTip.value = state.stickTip;
   ui.stickLength.value = state.stickLength;
   ui.supportThickness.value = state.supportThickness;
+  ui.anchorSpread.value = state.anchorSpread;
   ui.supportBar.value = state.supportBar ? "on" : "off";
   ui.frameStyle.value = state.frameStyle;
   ui.targetWidth.value = state.targetWidth;
@@ -336,6 +346,7 @@ async function ensureFont(fontKey) {
   if (fontCache.has(fontKey)) {
     scene.activeFont = fontCache.get(fontKey);
     scene.outlineFontReady = true;
+    scene.lastSuccessfulFontKey = fontKey;
     setFontStatus(`${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return scene.activeFont;
@@ -350,11 +361,21 @@ async function ensureFont(fontKey) {
     fontCache.set(fontKey, font);
     scene.activeFont = font;
     scene.outlineFontReady = true;
+    scene.lastSuccessfulFontKey = fontKey;
     setFontStatus(`${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return font;
   } catch (error) {
     if (requestId !== fontLoadRequestId) {
+      return scene.activeFont;
+    }
+    const fallbackKey =
+      scene.lastSuccessfulFontKey && fontCache.has(scene.lastSuccessfulFontKey) ? scene.lastSuccessfulFontKey : null;
+    if (fallbackKey) {
+      scene.activeFont = fontCache.get(fallbackKey);
+      scene.outlineFontReady = true;
+      setFontStatus(`${FONT_LIBRARY[fontKey].name} unavailable, using ${FONT_LIBRARY[fallbackKey].name}`, "warn");
+      setDownloadEnabled(true, "Download welded single-path SVG.");
       return scene.activeFont;
     }
     scene.activeFont = null;
@@ -636,7 +657,7 @@ function ensureAnchors(bounds) {
   if (count === 1) {
     defaults = [{ x: bounds.center.x, y: anchorY }];
   } else {
-    const margin = Math.max(bounds.width * 0.18, 28);
+    const margin = Math.max(bounds.width * (state.anchorSpread / 100), 28);
     defaults = [
       { x: bounds.left + margin, y: anchorY },
       { x: bounds.right - margin, y: anchorY },
@@ -1022,8 +1043,9 @@ function buildSupports(textBounds) {
 
 function fitItemIntoView(item) {
   const viewBounds = paper.view.bounds;
-  const usableWidth = viewBounds.width * 0.86;
-  const usableHeight = viewBounds.height * 0.82;
+  const previewScaleFactor = clamp(state.targetWidth / 7, 0.72, 1.28);
+  const usableWidth = viewBounds.width * 0.86 * previewScaleFactor;
+  const usableHeight = viewBounds.height * 0.82 * previewScaleFactor;
   const sourceBounds = item.bounds;
   const scale = Math.min(usableWidth / sourceBounds.width, usableHeight / sourceBounds.height);
   item.scale(scale);
@@ -1427,6 +1449,14 @@ function dragAnchor(index, point) {
 
   const bounds = scene.artworkForExport.bounds;
   scene.anchorPositions[index].x = clamp(Math.round(point.x / 10) * 10, bounds.left + 8, bounds.right - 8);
+  if (scene.anchorPositions.length === 2) {
+    const left = Math.min(scene.anchorPositions[0].x, scene.anchorPositions[1].x);
+    const right = Math.max(scene.anchorPositions[0].x, scene.anchorPositions[1].x);
+    const inferredSpread = ((left - bounds.left) / Math.max(bounds.width, 1)) * 100;
+    state.anchorSpread = Math.round(clamp(inferredSpread, 8, 34));
+    ui.anchorSpread.value = state.anchorSpread;
+    updateReadouts();
+  }
   renderScene();
 }
 
@@ -1549,6 +1579,7 @@ function bindEvents() {
   bindInput(ui.curveAmount, "curveAmount");
   bindInput(ui.stickLength, "stickLength");
   bindInput(ui.supportThickness, "supportThickness");
+  bindInput(ui.anchorSpread, "anchorSpread");
   bindInput(ui.targetWidth, "targetWidth", Number);
   ui.iconScale.addEventListener("input", () => {
     state.iconScale = Number(ui.iconScale.value);

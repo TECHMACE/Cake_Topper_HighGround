@@ -178,6 +178,11 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+#connectionDetail {
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+
 .status-pill.neutral {
   background: rgba(36, 24, 15, 0.08);
   color: var(--ink);
