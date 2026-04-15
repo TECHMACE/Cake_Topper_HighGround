@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,11 +9,224 @@
     <script src="https://unpkg.com/opentype.js@latest/dist/opentype.min.js"></script>
   </head>
   <body>
-    <h1>The High Ground</h1>
-    <p>Working sample</p>
-    <textarea id="message">Happy Birthday</textarea>
-    <button id="downloadBtn">Download SVG</button>
-    <canvas id="previewCanvas" resize></canvas>
+    <div class="app-shell">
+      <aside class="control-panel">
+        <div class="brand-block">
+          <p class="eyebrow">Browser Cake Topper Generator</p>
+          <h1>The High Ground</h1>
+          <p class="intro">
+            Build welded topper silhouettes for Cricut and laser workflows with real text outlines,
+            live support geometry, drag-to-snap decorations, and a single-path SVG export.
+          </p>
+        </div>
+
+        <section class="panel-section">
+          <div class="section-head">
+            <h2>Typography</h2>
+            <span id="fontStatus" class="status-pill">Loading font...</span>
+          </div>
+
+          <label class="field">
+            <span>Custom Text</span>
+            <textarea id="messageInput" rows="4">Happy
+Birthday</textarea>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Display Font</span>
+              <select id="fontSelect">
+                <option value="lilita">Lilita One</option>
+                <option value="bowlby">Bowlby One SC</option>
+                <option value="fredoka">Fredoka Bold</option>
+                <option value="great-vibes">Great Vibes</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Layout Mode</span>
+              <select id="layoutMode">
+                <option value="straight">Straight</option>
+                <option value="arch">Arch</option>
+                <option value="valley">Valley</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Font Size</span>
+              <input id="fontSize" type="range" min="80" max="260" step="2" value="160" />
+              <strong id="fontSizeValue">160 px</strong>
+            </label>
+
+            <label class="field">
+              <span>Line Height</span>
+              <input id="lineHeight" type="range" min="70" max="170" step="1" value="92" />
+              <strong id="lineHeightValue">92%</strong>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Letter Spacing</span>
+              <input id="letterSpacing" type="range" min="-26" max="40" step="1" value="-4" />
+              <strong id="letterSpacingValue">-4 px</strong>
+            </label>
+
+            <label class="field">
+              <span>Curve Amount</span>
+              <input id="curveAmount" type="range" min="0" max="220" step="2" value="72" />
+              <strong id="curveAmountValue">72 px</strong>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-head">
+            <h2>Structure</h2>
+            <span class="status-pill neutral">Drag anchors in preview</span>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Support Sticks</span>
+              <select id="stickCount">
+                <option value="0">None</option>
+                <option value="1">1 stick</option>
+                <option value="2" selected>2 sticks</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Stick Tip</span>
+              <select id="stickTip">
+                <option value="flat">Flat</option>
+                <option value="rounded">Rounded</option>
+                <option value="pointed">Pointed</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Stick Length</span>
+              <input id="stickLength" type="range" min="70" max="260" step="2" value="150" />
+              <strong id="stickLengthValue">150 px</strong>
+            </label>
+
+            <label class="field">
+              <span>Stick Width</span>
+              <input id="supportThickness" type="range" min="6" max="34" step="1" value="12" />
+              <strong id="supportThicknessValue">12 px</strong>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Support Bar</span>
+              <select id="supportBar">
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Frame Style</span>
+              <select id="frameStyle">
+                <option value="none">None</option>
+                <option value="circle">Circle</option>
+                <option value="scallop">Scallop</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-head">
+            <h2>Safety And Export</h2>
+            <span id="connectionStatus" class="status-pill neutral">Checking weld safety</span>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Target Width</span>
+              <input id="targetWidth" type="range" min="4" max="12" step="0.25" value="7" />
+              <strong id="targetWidthValue">7.00 in</strong>
+            </label>
+
+            <label class="field">
+              <span>Physical Size</span>
+              <div class="metric-box">
+                <strong id="physicalSize">7.00 in x 2.50 in</strong>
+                <small id="physicalMetric">177.8 mm x 63.5 mm</small>
+              </div>
+            </label>
+          </div>
+
+          <div class="toggle-row wrap">
+            <label class="checkbox">
+              <input id="autoBridgeIslands" type="checkbox" checked />
+              <span>Auto-bridge floating islands</span>
+            </label>
+            <label class="checkbox">
+              <input id="weldSupports" type="checkbox" checked />
+              <span>Weld all geometry into one export path</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-head">
+            <h2>Decorations</h2>
+            <span class="status-pill neutral">Drag icons onto the text</span>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Icon</span>
+              <select id="iconSelect">
+                <option value="heart">Heart</option>
+                <option value="star">Star</option>
+                <option value="ring">Ring</option>
+                <option value="paw">Paw</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Icon Size</span>
+              <input id="iconScale" type="range" min="18" max="90" step="2" value="40" />
+              <strong id="iconScaleValue">40 px</strong>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <button id="addIconBtn" type="button" class="secondary-btn">Add icon</button>
+            <button id="resetAnchorsBtn" type="button" class="secondary-btn">Reset anchors</button>
+            <button id="downloadBtn" type="button" class="primary-btn">Download SVG</button>
+          </div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <div class="workspace-top">
+          <div>
+            <p class="eyebrow">Live Cut Preview</p>
+            <h2>Final silhouette preview with welded text, sticks, icons, and frames.</h2>
+          </div>
+          <div class="legend">
+            <span><i class="dot accent"></i>Draggable anchor</span>
+            <span><i class="dot soft"></i>Snap guide</span>
+            <span><i class="dot icon"></i>Draggable icon</span>
+          </div>
+        </div>
+
+        <div class="canvas-wrap">
+          <canvas id="previewCanvas" resize></canvas>
+        </div>
+      </main>
+    </div>
+
     <script src="app.js"></script>
   </body>
 </html>
