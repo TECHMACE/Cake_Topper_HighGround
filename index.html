@@ -222,6 +222,10 @@ Birthday</textarea>
               <input id="weldSupports" type="checkbox" checked />
               <span>Weld all geometry into one export path</span>
             </label>
+            <label class="checkbox">
+              <input id="autoFitCutting" type="checkbox" checked />
+              <span>Auto-fit for cutting</span>
+            </label>
           </div>
 
           <div class="field-grid compact-grid">
@@ -275,6 +279,7 @@ Birthday</textarea>
           </div>
 
           <div class="toggle-row">
+            <button id="autoFitBtn" type="button" class="secondary-btn">Auto-fit now</button>
             <button id="addIconBtn" type="button" class="secondary-btn">Add icon</button>
             <button id="removeIconBtn" type="button" class="secondary-btn">Remove selected</button>
             <button id="clearIconsBtn" type="button" class="secondary-btn">Clear icons</button>
@@ -284,6 +289,9 @@ Birthday</textarea>
           <p id="iconSelectionStatus" class="helper-text">No icon selected. Added icons will appear near the topper and can be dragged.</p>
           <p class="helper-text">
             “Add icon” places the selected built-in decoration into the preview. Then drag it onto the topper until it snaps into place and gets welded into the final cut shape.
+          </p>
+          <p class="helper-text">
+            Drag empty space in the preview to pan the whole topper if part of it is hard to see.
           </p>
         </section>
       </aside>

@@ -109,10 +109,13 @@ const DEFAULT_STATE = {
   previewZoom: 100,
   gridMode: "inch",
   autoBridgeIslands: true,
+  autoFitCutting: true,
   weldSupports: true,
   iconScale: 40,
   icons: [],
   selectedIconIndex: null,
+  viewOffsetX: 0,
+  viewOffsetY: 0,
 };
 
 const state = { ...DEFAULT_STATE };
@@ -142,10 +145,12 @@ const ui = {
   previewZoom: document.getElementById("previewZoom"),
   gridMode: document.getElementById("gridMode"),
   autoBridgeIslands: document.getElementById("autoBridgeIslands"),
+  autoFitCutting: document.getElementById("autoFitCutting"),
   weldSupports: document.getElementById("weldSupports"),
   iconSelect: document.getElementById("iconSelect"),
   iconScale: document.getElementById("iconScale"),
   addIconBtn: document.getElementById("addIconBtn"),
+  autoFitBtn: document.getElementById("autoFitBtn"),
   removeIconBtn: document.getElementById("removeIconBtn"),
   clearIconsBtn: document.getElementById("clearIconsBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
@@ -181,10 +186,12 @@ const scene = {
   guideLayer: null,
   anchorLayer: null,
   iconLayer: null,
+  selectionLayer: null,
   gridLayer: null,
   anchorPositions: [],
   dragTarget: null,
   dragOffset: null,
+  dragViewOrigin: null,
   lastSuccessfulFontKey: null,
 };
 
@@ -214,11 +221,11 @@ function setConnectionStatus(message, tone) {
 
 function updateSelectedIconStatus() {
   if (state.selectedIconIndex === null || !state.icons[state.selectedIconIndex]) {
-    ui.iconSelectionStatus.textContent = "No icon selected. Added icons will appear near the topper and can be dragged.";
+    ui.iconSelectionStatus.textContent = "No icon selected. Added icons will appear near the topper and can be dragged. Drag empty preview space to pan.";
     return;
   }
   const icon = state.icons[state.selectedIconIndex];
-  ui.iconSelectionStatus.textContent = `Selected ${icon.type} icon at ${Math.round(icon.size)} px. Drag it, resize it with the slider, or remove it.`;
+  ui.iconSelectionStatus.textContent = `Selected ${icon.type} icon at ${Math.round(icon.size)} px. The blue highlighted shape is active. Drag it, resize it, or remove it.`;
 }
 
 function clamp(value, min, max) {
@@ -317,6 +324,7 @@ function syncControlsFromState() {
   ui.previewZoom.value = state.previewZoom;
   ui.gridMode.value = state.gridMode;
   ui.autoBridgeIslands.checked = state.autoBridgeIslands;
+  ui.autoFitCutting.checked = state.autoFitCutting;
   ui.weldSupports.checked = state.weldSupports;
   ui.iconScale.value = state.iconScale;
   setDownloadEnabled(false, "Load or upload an outline font to export SVG.");
@@ -1330,6 +1338,39 @@ function buildSupports(textBounds, attachmentTarget) {
   };
 }
 
+function applyAutoFitAdjustments() {
+  if (!state.autoFitCutting) {
+    return;
+  }
+
+  if (state.stickCount === 1) {
+    scene.anchorPositions = scene.anchorPositions.map((anchor) => ({
+      ...anchor,
+      x: anchor.x + (paper.view.center.x - anchor.x) * 0.35,
+    }));
+  }
+
+  if (state.stickCount === 2) {
+    state.supportBar = true;
+    ui.supportBar.value = "on";
+    if (state.supportThickness < 12) {
+      state.supportThickness = 12;
+      ui.supportThickness.value = state.supportThickness;
+    }
+    if (state.anchorSpread < 14) {
+      state.anchorSpread = 14;
+      ui.anchorSpread.value = state.anchorSpread;
+    }
+  }
+
+  if (state.stickCount > 0 && state.supportThickness < 10) {
+    state.supportThickness = 10;
+    ui.supportThickness.value = state.supportThickness;
+  }
+
+  updateReadouts();
+}
+
 function fitItemIntoView(item) {
   const viewBounds = paper.view.bounds;
   const sourceBounds = item.bounds;
@@ -1341,8 +1382,8 @@ function fitItemIntoView(item) {
   item.scale(scale);
   const topPadding = viewBounds.height * 0.07;
   const scaledBounds = item.bounds;
-  const targetCenterY = viewBounds.top + topPadding + scaledBounds.height / 2;
-  item.position = new paper.Point(viewBounds.center.x, targetCenterY);
+  const targetCenterY = viewBounds.top + topPadding + scaledBounds.height / 2 + state.viewOffsetY;
+  item.position = new paper.Point(viewBounds.center.x + state.viewOffsetX, targetCenterY);
 }
 
 function drawAnchorHandles() {
@@ -1409,6 +1450,43 @@ function drawIcons(draggableIcons) {
     }
   });
   scene.iconLayer = layer;
+}
+
+function drawSelectionOverlay() {
+  if (state.selectedIconIndex === null || !scene.iconLayer) {
+    scene.selectionLayer = null;
+    return;
+  }
+
+  const selectedItems = scene.iconLayer.children.filter((child) => child.data?.kind === "icon" && child.data?.index === state.selectedIconIndex);
+  if (!selectedItems.length) {
+    scene.selectionLayer = null;
+    return;
+  }
+
+  const bounds = selectedItems.reduce((acc, item) => (acc ? acc.unite(item.bounds) : item.bounds.clone()), null);
+  if (!bounds) {
+    scene.selectionLayer = null;
+    return;
+  }
+
+  const padding = 8;
+  const ring = new paper.Path.Rectangle({
+    rectangle: new paper.Rectangle(bounds.x - padding, bounds.y - padding, bounds.width + padding * 2, bounds.height + padding * 2),
+    radius: 10,
+    strokeColor: "#2f5d7d",
+    strokeWidth: 2,
+    dashArray: [10, 6],
+    fillColor: "rgba(47, 93, 125, 0.05)",
+  });
+  const label = new paper.PointText({
+    point: new paper.Point(bounds.left, bounds.top - 10),
+    content: "Selected",
+    fillColor: "#2f5d7d",
+    fontSize: 11,
+    fontWeight: "bold",
+  });
+  scene.selectionLayer = new paper.Group({ children: [ring, label] });
 }
 
 function markIconHitTargets(item, index) {
@@ -1581,6 +1659,7 @@ function renderScene() {
     drawScaleGrid(textArtwork.bounds);
     const textBounds = textArtwork.bounds.clone();
     const frameArtwork = buildFrame(textBounds, state.supportThickness);
+    applyAutoFitAdjustments();
     const supportAttachmentTarget = unionItems([textArtwork.clone(false), frameArtwork?.clone(false)].filter(Boolean));
     const supports = buildSupports(textBounds, supportAttachmentTarget);
     supportAttachmentTarget?.remove();
@@ -1640,6 +1719,7 @@ function renderScene() {
 
     drawAnchorHandles();
     drawIcons(iconArtwork.draggableIcons);
+    drawSelectionOverlay();
     updatePhysicalSize(scene.artworkForExport.bounds);
     updateConnectionStatus(islandCount, bridgesAdded);
     const readiness = assessCutReadiness(scene.artworkForExport.bounds, islandCount);
@@ -1731,6 +1811,13 @@ function clearIcons() {
   renderScene();
 }
 
+function autoFitNow() {
+  state.autoFitCutting = true;
+  ui.autoFitCutting.checked = true;
+  applyAutoFitAdjustments();
+  renderScene();
+}
+
 function hitTargetData(eventPoint) {
   const hitResult = paper.project.hitTest(eventPoint, {
     fill: true,
@@ -1780,7 +1867,11 @@ function dragIcon(index, point) {
 tool.onMouseDown = (event) => {
   const data = hitTargetData(event.point);
   if (!data) {
-    scene.dragTarget = null;
+    state.selectedIconIndex = null;
+    updateSelectedIconStatus();
+    scene.dragTarget = { kind: "pan" };
+    scene.dragViewOrigin = new paper.Point(state.viewOffsetX, state.viewOffsetY);
+    renderScene();
     return;
   }
 
@@ -1807,6 +1898,14 @@ tool.onMouseDrag = (event) => {
     return;
   }
 
+  if (scene.dragTarget.kind === "pan") {
+    const origin = scene.dragViewOrigin || new paper.Point(state.viewOffsetX, state.viewOffsetY);
+    state.viewOffsetX = origin.x + event.delta.x;
+    state.viewOffsetY = origin.y + event.delta.y;
+    renderScene();
+    return;
+  }
+
   if (scene.dragTarget.kind === "anchor") {
     dragAnchor(scene.dragTarget.index, event.point);
     return;
@@ -1820,6 +1919,7 @@ tool.onMouseDrag = (event) => {
 tool.onMouseUp = () => {
   scene.dragTarget = null;
   scene.dragOffset = null;
+  scene.dragViewOrigin = null;
 };
 
 window.addEventListener("error", (event) => {
@@ -1930,11 +2030,17 @@ function bindEvents() {
     renderScene();
   });
 
+  ui.autoFitCutting.addEventListener("change", () => {
+    state.autoFitCutting = ui.autoFitCutting.checked;
+    renderScene();
+  });
+
   ui.weldSupports.addEventListener("change", () => {
     state.weldSupports = ui.weldSupports.checked;
     renderScene();
   });
 
+  ui.autoFitBtn.addEventListener("click", autoFitNow);
   ui.addIconBtn.addEventListener("click", addIcon);
   ui.removeIconBtn.addEventListener("click", removeSelectedIcon);
   ui.clearIconsBtn.addEventListener("click", clearIcons);
