@@ -313,6 +313,13 @@ function ensureCanvasSize() {
   setPreviewMeta(`Canvas ${width} x ${height} px. ${scene.outlineFontReady ? "Outline font ready." : "Preview mode active."}`);
 }
 
+function previewPixelsPerInch() {
+  const viewBounds = paper.view.bounds;
+  const baseWidthScale = (viewBounds.width * 0.74) / 12;
+  const baseHeightScale = (viewBounds.height * 0.72) / 8;
+  return Math.max(Math.min(baseWidthScale, baseHeightScale), 28) * (state.previewZoom / 100);
+}
+
 function drawScaleGrid(itemBounds) {
   if (state.gridMode === "off" || !itemBounds || !itemBounds.width || !itemBounds.height) {
     scene.gridLayer = null;
@@ -320,7 +327,7 @@ function drawScaleGrid(itemBounds) {
   }
 
   const inchStep = state.gridMode === "half-inch" ? 0.5 : 1;
-  const pxPerInch = itemBounds.width / Math.max(state.targetWidth, 0.1);
+  const pxPerInch = previewPixelsPerInch();
   const spacing = pxPerInch * inchStep;
   if (!Number.isFinite(spacing) || spacing < 18) {
     scene.gridLayer = null;
@@ -625,9 +632,66 @@ function findExteriorPaths(item) {
   });
 }
 
-function connectDetachedIslands(item, thickness) {
+function candidateBridgeTargets(path) {
+  const { left, right, top, bottom, center, width, height } = path.bounds;
+  return [
+    center,
+    new paper.Point(center.x, bottom),
+    new paper.Point(center.x, bottom - height * 0.18),
+    new paper.Point(left, center.y),
+    new paper.Point(right, center.y),
+    new paper.Point(left + width * 0.22, bottom),
+    new paper.Point(right - width * 0.22, bottom),
+    new paper.Point(center.x, top + height * 0.62),
+  ];
+}
+
+function pickBridgePair(pathA, pathB, options = {}) {
+  let bestPair = null;
+
+  candidateBridgeTargets(pathA).forEach((target) => {
+    const pointA = pathA.getNearestPoint(target);
+    const pointB = pathB.getNearestPoint(pointA);
+    const correctedA = pathA.getNearestPoint(pointB);
+    const distance = correctedA.getDistance(pointB);
+    const lowerBias = options.preferLower ? (pathA.bounds.bottom - (correctedA.y + pointB.y) / 2) * 0.18 : 0;
+    const verticalBias = Math.abs(correctedA.y - pointB.y) * (options.preferLower ? 0.04 : 0.08);
+    const score = distance + lowerBias + verticalBias;
+
+    if (!bestPair || score < bestPair.score) {
+      bestPair = {
+        score,
+        pointA: correctedA,
+        pointB,
+      };
+    }
+  });
+
+  return bestPair;
+}
+
+function chooseIslandBridge(exteriors, options = {}) {
+  let best = null;
+
+  for (let firstIndex = 0; firstIndex < exteriors.length; firstIndex += 1) {
+    for (let secondIndex = firstIndex + 1; secondIndex < exteriors.length; secondIndex += 1) {
+      const pair = pickBridgePair(exteriors[firstIndex], exteriors[secondIndex], options);
+      if (!pair) {
+        continue;
+      }
+      if (!best || pair.score < best.score) {
+        best = pair;
+      }
+    }
+  }
+
+  return best;
+}
+
+function connectDetachedIslands(item, thickness, options = {}) {
   let working = item.clone(false);
   let bridgesAdded = 0;
+  let lastBridgeThickness = 0;
 
   while (true) {
     const exteriors = findExteriorPaths(working).sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
@@ -635,26 +699,26 @@ function connectDetachedIslands(item, thickness) {
       break;
     }
 
-    const mainBody = exteriors[0];
-    const island = exteriors[1];
-    const islandCenter = island.bounds.center;
-    let mainPoint = mainBody.getNearestPoint(islandCenter);
-    let islandPoint = island.getNearestPoint(mainPoint);
-    mainPoint = mainBody.getNearestPoint(islandPoint);
-
-    const bridge = roundedSegment(mainPoint, islandPoint, thickness);
+    const nextBridge = chooseIslandBridge(exteriors, options);
+    if (!nextBridge) {
+      break;
+    }
+    const bridgeThickness =
+      typeof options.bridgeThickness === "function" ? options.bridgeThickness(nextBridge, bridgesAdded) : thickness;
+    const bridge = roundedSegment(nextBridge.pointA, nextBridge.pointB, bridgeThickness);
     const merged = working.unite(bridge, { insert: false });
     working.remove();
     bridge.remove();
     working = merged;
     bridgesAdded += 1;
+    lastBridgeThickness = bridgeThickness;
 
-    if (bridgesAdded > 12) {
+    if (bridgesAdded > (options.maxBridges || 12)) {
       break;
     }
   }
 
-  return { item: working, bridgesAdded };
+  return { item: working, bridgesAdded, lastBridgeThickness };
 }
 
 function curveOffset(normalizedX) {
@@ -731,7 +795,22 @@ function buildTextArtwork() {
     }
   });
 
-  return unionItems(lineItems);
+  const mergedLines = unionItems(lineItems);
+  if (!mergedLines) {
+    return null;
+  }
+
+  const textBridgeThickness = Math.max(state.supportThickness * 0.95, state.fontSize * 0.08, 10);
+  const bridgedText = connectDetachedIslands(mergedLines, textBridgeThickness, {
+    preferLower: true,
+    maxBridges: 18,
+    bridgeThickness: (bridgeChoice) => {
+      const distance = bridgeChoice.pointA.getDistance(bridgeChoice.pointB);
+      return Math.max(textBridgeThickness, Math.min(distance * 0.85, textBridgeThickness * 1.7));
+    },
+  });
+  mergedLines.remove();
+  return bridgedText.item;
 }
 
 function ensureAnchors(bounds) {
@@ -1133,12 +1212,12 @@ function buildSupports(textBounds) {
 
 function fitItemIntoView(item) {
   const viewBounds = paper.view.bounds;
-  const previewScaleFactor = clamp(state.targetWidth / 7, 0.72, 1.28);
-  const zoomFactor = state.previewZoom / 100;
-  const usableWidth = viewBounds.width * 0.86 * previewScaleFactor * zoomFactor;
-  const usableHeight = viewBounds.height * 0.82 * previewScaleFactor * zoomFactor;
   const sourceBounds = item.bounds;
-  const scale = Math.min(usableWidth / sourceBounds.width, usableHeight / sourceBounds.height);
+  const desiredWidth = Math.max(state.targetWidth * previewPixelsPerInch(), 120);
+  const maxHeight = viewBounds.height * 0.84;
+  const widthScale = desiredWidth / Math.max(sourceBounds.width, 1);
+  const heightScale = maxHeight / Math.max(sourceBounds.height, 1);
+  const scale = Math.min(widthScale, heightScale);
   item.scale(scale);
   const topPadding = viewBounds.height * 0.07;
   const scaledBounds = item.bounds;
@@ -1676,6 +1755,11 @@ function bindEvents() {
   bindInput(ui.supportThickness, "supportThickness");
   bindInput(ui.anchorSpread, "anchorSpread");
   bindInput(ui.targetWidth, "targetWidth", Number);
+  bindInput(ui.previewZoom, "previewZoom", Number);
+  ui.gridMode.addEventListener("change", () => {
+    state.gridMode = ui.gridMode.value;
+    renderScene();
+  });
   ui.iconScale.addEventListener("input", () => {
     state.iconScale = Number(ui.iconScale.value);
     if (state.selectedIconIndex !== null && state.icons[state.selectedIconIndex]) {
