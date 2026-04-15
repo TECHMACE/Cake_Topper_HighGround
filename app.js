@@ -220,6 +220,13 @@ function clearCanvas() {
   paper.project.activeLayer.removeChildren();
 }
 
+function attachToLayer(item) {
+  if (item && !item.parent) {
+    paper.project.activeLayer.addChild(item);
+  }
+  return item;
+}
+
 function ensureCanvasSize() {
   const rect = ui.previewCanvas.getBoundingClientRect();
   const width = Math.max(Math.round(rect.width), 640);
@@ -1172,6 +1179,7 @@ function renderPreviewOnlyText() {
   const scale = Math.min(usableWidth / Math.max(sourceBounds.width, 1), usableHeight / Math.max(sourceBounds.height, 1));
   group.scale(scale);
   group.position = new paper.Point(viewBounds.center.x, viewBounds.center.y - 24);
+  attachToLayer(group);
   setPreviewMeta(`Canvas ${Math.round(viewBounds.width)} x ${Math.round(viewBounds.height)} px. Showing preview text without export outlines.`);
   return group;
 }
@@ -1240,11 +1248,14 @@ function renderScene() {
 
     welded.fillColor = "#1d130d";
     welded.strokeColor = null;
+    attachToLayer(welded);
+    attachToLayer(supports.guides);
     supports.guides.insertBelow(welded);
     scene.guideLayer = supports.guides;
 
     if (!state.weldSupports && supports.welded) {
       supports.welded.fillColor = "rgba(29, 19, 13, 0.24)";
+      attachToLayer(supports.welded);
       supports.welded.insertAbove(supports.guides);
     }
 
