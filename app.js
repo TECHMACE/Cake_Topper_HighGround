@@ -84,10 +84,6 @@ const ui = {
   supportThicknessValue: document.getElementById("supportThicknessValue"),
   targetWidthValue: document.getElementById("targetWidthValue"),
   iconScaleValue: document.getElementById("iconScaleValue"),
-  previewOverlay: document.getElementById("previewOverlay"),
-  progressFill: document.getElementById("progressFill"),
-  previewStatusText: document.getElementById("previewStatusText"),
-  previewStatusSubtext: document.getElementById("previewStatusSubtext"),
 };
 
 const scene = {
@@ -105,7 +101,6 @@ const scene = {
 
 const tool = new paper.Tool();
 let fontLoadRequestId = 0;
-let overlayTimeoutId = null;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -144,35 +139,6 @@ function setStatus(element, message, tone) {
   }
 
   element.classList.add("neutral");
-}
-
-function setPreviewOverlay(visible, title, detail, progress = null) {
-  if (overlayTimeoutId) {
-    window.clearTimeout(overlayTimeoutId);
-    overlayTimeoutId = null;
-  }
-
-  ui.previewOverlay.classList.toggle("hidden", !visible);
-  ui.previewOverlay.setAttribute("aria-hidden", visible ? "false" : "true");
-  if (title) {
-    ui.previewStatusText.textContent = title;
-  }
-  if (detail) {
-    ui.previewStatusSubtext.textContent = detail;
-  }
-  if (typeof progress === "number") {
-    ui.progressFill.style.width = `${clamp(progress, 4, 100)}%`;
-  }
-
-  if (visible) {
-    const isPersistentState = /failed|error/i.test(title || "") || /failed|error/i.test(detail || "");
-    if (!isPersistentState) {
-      overlayTimeoutId = window.setTimeout(() => {
-        ui.previewOverlay.classList.add("hidden");
-        ui.previewOverlay.setAttribute("aria-hidden", "true");
-      }, 900);
-    }
-  }
 }
 
 function setDownloadEnabled(enabled, titleText = "") {
@@ -245,11 +211,8 @@ function loadFont(fontKey) {
 
     request.onprogress = (event) => {
       if (!event.lengthComputable) {
-        setPreviewOverlay(true, `Loading ${fontMeta.name}…`, "Downloading font outlines.", 42);
         return;
       }
-      const percent = 12 + (event.loaded / event.total) * 56;
-      setPreviewOverlay(true, `Loading ${fontMeta.name}…`, "Downloading font outlines.", percent);
     };
 
     request.onload = () => {
@@ -285,13 +248,11 @@ async function ensureFont(fontKey) {
     scene.activeFont = fontCache.get(fontKey);
     scene.outlineFontReady = true;
     setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
-    setPreviewOverlay(false);
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return scene.activeFont;
   }
 
   setStatus(ui.fontStatus, `Loading ${FONT_LIBRARY[fontKey].name}...`, "warn");
-  setPreviewOverlay(true, `Loading ${FONT_LIBRARY[fontKey].name}…`, "Preview stays usable while font loads.", 18);
   try {
     const font = await withTimeout(loadFont(fontKey), 3500, "Remote font load took too long");
     if (requestId !== fontLoadRequestId) {
@@ -301,7 +262,6 @@ async function ensureFont(fontKey) {
     scene.activeFont = font;
     scene.outlineFontReady = true;
     setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
-    setPreviewOverlay(true, "Building preview…", "Welding outlines into a single cut shape.", 82);
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return font;
   } catch (error) {
@@ -311,7 +271,6 @@ async function ensureFont(fontKey) {
     scene.activeFont = null;
     scene.outlineFontReady = false;
     setStatus(ui.fontStatus, "Remote font unavailable", "warn");
-    setPreviewOverlay(false);
     setDownloadEnabled(false, "Upload a .ttf or .otf font for export-ready outlines.");
     return null;
   }
@@ -1171,7 +1130,6 @@ function renderScene() {
       scene.silhouettePreview = previewGroup;
       updatePhysicalSize(previewGroup ? previewGroup.bounds : null);
       setStatus(ui.connectionStatus, "Preview only: upload a font for export-ready outlines", "warn");
-      setPreviewOverlay(false);
       paper.view.update();
       return;
     }
@@ -1234,12 +1192,10 @@ function renderScene() {
     updateConnectionStatus(islandCount, bridgesAdded);
     const readiness = assessCutReadiness(scene.artworkForExport.bounds, islandCount);
     setStatus(ui.connectionStatus, `${ui.connectionStatus.textContent} • ${readiness.message}`, readiness.tone);
-    setPreviewOverlay(false);
     paper.view.update();
   } catch (error) {
     console.error(error);
     setStatus(ui.connectionStatus, "Preview error", "error");
-    setPreviewOverlay(true, "Preview failed", error.message || "A browser-side rendering error occurred.", 100);
     renderFallback("Preview failed. See status above.");
   }
 }
@@ -1368,7 +1324,6 @@ tool.onMouseUp = () => {
 
 window.addEventListener("error", (event) => {
   setStatus(ui.connectionStatus, "Preview error", "error");
-  setPreviewOverlay(true, "Preview failed", event.message || "A browser-side error occurred.", 100);
 });
 
 function bindInput(element, stateKey, transformer = Number) {
@@ -1400,7 +1355,6 @@ function bindEvents() {
       return;
     }
 
-    setPreviewOverlay(true, "Loading local font…", `Parsing ${file.name}`, 40);
     try {
       const font = await loadUploadedFont(file);
       const customKey = `uploaded:${file.name}`;
@@ -1410,15 +1364,12 @@ function bindEvents() {
       state.fontKey = BUILTIN_FONT_KEYS.includes(state.fontKey) ? state.fontKey : customKey;
       setStatus(ui.fontStatus, `${file.name} ready`, "ok");
       setDownloadEnabled(true, "Download welded single-path SVG.");
-      setPreviewOverlay(true, "Building preview…", "Using your uploaded local font for outlines.", 86);
       renderScene();
-      setPreviewOverlay(false);
     } catch (error) {
       scene.activeFont = null;
       scene.outlineFontReady = false;
       setStatus(ui.fontStatus, "Uploaded font could not be parsed", "error");
       setDownloadEnabled(false, "Upload a valid .ttf or .otf font.");
-      setPreviewOverlay(false);
       renderScene();
     }
   });
@@ -1478,7 +1429,6 @@ function bindEvents() {
 async function initialize() {
   syncControlsFromState();
   bindEvents();
-  setPreviewOverlay(false);
   renderScene();
   await ensureFont(state.fontKey);
   renderScene();
