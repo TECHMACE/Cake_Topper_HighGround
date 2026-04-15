@@ -116,6 +116,7 @@ const DEFAULT_STATE = {
   selectedIconIndex: null,
   viewOffsetX: 0,
   viewOffsetY: 0,
+  hoverPoint: null,
 };
 
 const state = { ...DEFAULT_STATE };
@@ -187,6 +188,7 @@ const scene = {
   anchorLayer: null,
   iconLayer: null,
   selectionLayer: null,
+  hoverLayer: null,
   gridLayer: null,
   anchorPositions: [],
   dragTarget: null,
@@ -197,7 +199,9 @@ const scene = {
 
 const tool = new paper.Tool();
 let fontLoadRequestId = 0;
+let renderQueued = false;
 const unavailableFontKeys = new Set();
+const SCRIPT_FONT_KEYS = new Set(["great-vibes", "allura", "dancing-script", "parisienne", "pacifico", "sacramento", "lobster"]);
 
 function setPreviewMeta(message) {
   ui.previewMeta.textContent = message;
@@ -1343,6 +1347,40 @@ function applyAutoFitAdjustments() {
     return;
   }
 
+  const lines = (state.message || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const longestLine = lines.reduce((max, line) => Math.max(max, line.length), 0);
+  const shortestLine = lines.reduce((min, line) => Math.min(min, line.length), longestLine || 0);
+  const profileRatio = shortestLine ? longestLine / shortestLine : 1;
+  const isScriptFont = SCRIPT_FONT_KEYS.has(state.fontKey);
+
+  if (lines.length > 1) {
+    const minLineHeight = isScriptFont ? 94 : 84;
+    const maxOverlapSpacing = isScriptFont ? -2 : -8;
+    state.lineHeight = Math.max(state.lineHeight, minLineHeight);
+    state.letterSpacing = Math.max(state.letterSpacing, maxOverlapSpacing);
+    if (profileRatio > 1.55 && state.layoutMode === "straight") {
+      state.layoutMode = "arch";
+      ui.layoutMode.value = state.layoutMode;
+    }
+    if (state.layoutMode !== "straight") {
+      const desiredCurve = isScriptFont ? 54 : 72;
+      state.curveAmount = Math.min(Math.max(state.curveAmount, desiredCurve), desiredCurve + 26);
+      ui.curveAmount.value = state.curveAmount;
+    }
+    ui.lineHeight.value = state.lineHeight;
+    ui.letterSpacing.value = state.letterSpacing;
+  } else if (lines.length === 1) {
+    state.lineHeight = Math.max(state.lineHeight, isScriptFont ? 96 : 88);
+    if (state.layoutMode !== "straight") {
+      state.curveAmount = Math.min(state.curveAmount, isScriptFont ? 68 : 90);
+      ui.curveAmount.value = state.curveAmount;
+    }
+    ui.lineHeight.value = state.lineHeight;
+  }
+
   if (state.stickCount === 1) {
     scene.anchorPositions = scene.anchorPositions.map((anchor) => ({
       ...anchor,
@@ -1366,6 +1404,14 @@ function applyAutoFitAdjustments() {
   if (state.stickCount > 0 && state.supportThickness < 10) {
     state.supportThickness = 10;
     ui.supportThickness.value = state.supportThickness;
+  }
+
+  if (state.frameStyle !== "none") {
+    const minPadding = isScriptFont ? 52 : 46;
+    if (state.framePadding < minPadding) {
+      state.framePadding = minPadding;
+      ui.framePadding.value = state.framePadding;
+    }
   }
 
   updateReadouts();
@@ -1487,6 +1533,47 @@ function drawSelectionOverlay() {
     fontWeight: "bold",
   });
   scene.selectionLayer = new paper.Group({ children: [ring, label] });
+}
+
+function drawHoverOverlay() {
+  const hitResult = paper.project.hitTest(state.hoverPoint || paper.view.center, {
+    fill: true,
+    stroke: true,
+    tolerance: 12,
+  });
+  const data = hitResult?.item?.data || null;
+  ui.previewCanvas.style.cursor = data ? "grab" : "default";
+
+  if (!data) {
+    scene.hoverLayer = null;
+    return;
+  }
+
+  let bounds = null;
+  if (data.kind === "icon" && scene.iconLayer) {
+    const items = scene.iconLayer.children.filter((child) => child.data?.kind === "icon" && child.data?.index === data.index);
+    bounds = items.reduce((acc, item) => (acc ? acc.unite(item.bounds) : item.bounds.clone()), null);
+  }
+
+  if (data.kind === "anchor" && scene.anchorLayer) {
+    const items = scene.anchorLayer.children.filter((child) => child.data?.kind === "anchor" && child.data?.index === data.index);
+    bounds = items.reduce((acc, item) => (acc ? acc.unite(item.bounds) : item.bounds.clone()), null);
+  }
+
+  if (!bounds) {
+    scene.hoverLayer = null;
+    return;
+  }
+
+  const glow = new paper.Path.Rectangle({
+    rectangle: new paper.Rectangle(bounds.x - 6, bounds.y - 6, bounds.width + 12, bounds.height + 12),
+    radius: 10,
+    strokeColor: "rgba(255, 164, 82, 0.95)",
+    strokeWidth: 2,
+    dashArray: [6, 4],
+    fillColor: "rgba(255, 164, 82, 0.08)",
+  });
+  scene.hoverLayer = glow;
 }
 
 function markIconHitTargets(item, index) {
@@ -1635,11 +1722,12 @@ function renderPreviewOnlyText() {
   return group;
 }
 
-function renderScene() {
+function performRenderScene() {
   try {
     ensureCanvasSize();
     clearCanvas();
 
+    applyAutoFitAdjustments();
     const textArtwork = buildTextArtwork();
     if (!textArtwork) {
       const previewGroup = renderPreviewOnlyText();
@@ -1659,7 +1747,6 @@ function renderScene() {
     drawScaleGrid(textArtwork.bounds);
     const textBounds = textArtwork.bounds.clone();
     const frameArtwork = buildFrame(textBounds, state.supportThickness);
-    applyAutoFitAdjustments();
     const supportAttachmentTarget = unionItems([textArtwork.clone(false), frameArtwork?.clone(false)].filter(Boolean));
     const supports = buildSupports(textBounds, supportAttachmentTarget);
     supportAttachmentTarget?.remove();
@@ -1720,6 +1807,7 @@ function renderScene() {
     drawAnchorHandles();
     drawIcons(iconArtwork.draggableIcons);
     drawSelectionOverlay();
+    drawHoverOverlay();
     updatePhysicalSize(scene.artworkForExport.bounds);
     updateConnectionStatus(islandCount, bridgesAdded);
     const readiness = assessCutReadiness(scene.artworkForExport.bounds, islandCount);
@@ -1737,6 +1825,17 @@ function renderScene() {
     setPreviewMeta(`Render failed: ${error.message || "Unknown error"}`);
     renderFallback("Preview failed. See status above.");
   }
+}
+
+function renderScene() {
+  if (renderQueued) {
+    return;
+  }
+  renderQueued = true;
+  window.requestAnimationFrame(() => {
+    renderQueued = false;
+    performRenderScene();
+  });
 }
 
 function buildExportSvg() {
@@ -1865,12 +1964,14 @@ function dragIcon(index, point) {
 }
 
 tool.onMouseDown = (event) => {
+  state.hoverPoint = event.point;
   const data = hitTargetData(event.point);
   if (!data) {
     state.selectedIconIndex = null;
     updateSelectedIconStatus();
     scene.dragTarget = { kind: "pan" };
     scene.dragViewOrigin = new paper.Point(state.viewOffsetX, state.viewOffsetY);
+    ui.previewCanvas.style.cursor = "grabbing";
     renderScene();
     return;
   }
@@ -1894,6 +1995,7 @@ tool.onMouseDown = (event) => {
 };
 
 tool.onMouseDrag = (event) => {
+  state.hoverPoint = event.point;
   if (!scene.dragTarget) {
     return;
   }
@@ -1920,6 +2022,14 @@ tool.onMouseUp = () => {
   scene.dragTarget = null;
   scene.dragOffset = null;
   scene.dragViewOrigin = null;
+  ui.previewCanvas.style.cursor = "default";
+};
+
+tool.onMouseMove = (event) => {
+  state.hoverPoint = event.point;
+  if (!scene.dragTarget) {
+    renderScene();
+  }
 };
 
 window.addEventListener("error", (event) => {
