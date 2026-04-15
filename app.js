@@ -50,9 +50,17 @@ const FONT_LIBRARY = {
     name: "Great Vibes",
     url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/greatvibes/GreatVibes-Regular.ttf",
   },
+  allura: {
+    name: "Allura",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/allura/Allura-Regular.ttf",
+  },
   anton: {
     name: "Anton",
     url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/anton/Anton-Regular.ttf",
+  },
+  "dancing-script": {
+    name: "Dancing Script",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/dancingscript/DancingScript-Regular.ttf",
   },
   "luckiest-guy": {
     name: "Luckiest Guy",
@@ -62,6 +70,10 @@ const FONT_LIBRARY = {
     name: "Lobster",
     url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/lobster/Lobster-Regular.ttf",
   },
+  parisienne: {
+    name: "Parisienne",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/parisienne/Parisienne-Regular.ttf",
+  },
   "passion-one": {
     name: "Passion One Bold",
     url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/passionone/PassionOne-Bold.ttf",
@@ -69,6 +81,10 @@ const FONT_LIBRARY = {
   pacifico: {
     name: "Pacifico",
     url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/pacifico/Pacifico-Regular.ttf",
+  },
+  sacramento: {
+    name: "Sacramento",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/sacramento/Sacramento-Regular.ttf",
   },
 };
 
@@ -86,6 +102,8 @@ const DEFAULT_STATE = {
   supportThickness: 12,
   supportBar: true,
   frameStyle: "none",
+  framePadding: 62,
+  frameLift: 0,
   anchorSpread: 18,
   targetWidth: 7,
   previewZoom: 100,
@@ -118,6 +136,8 @@ const ui = {
   anchorSpread: document.getElementById("anchorSpread"),
   supportBar: document.getElementById("supportBar"),
   frameStyle: document.getElementById("frameStyle"),
+  framePadding: document.getElementById("framePadding"),
+  frameLift: document.getElementById("frameLift"),
   targetWidth: document.getElementById("targetWidth"),
   previewZoom: document.getElementById("previewZoom"),
   gridMode: document.getElementById("gridMode"),
@@ -143,6 +163,8 @@ const ui = {
   stickLengthValue: document.getElementById("stickLengthValue"),
   supportThicknessValue: document.getElementById("supportThicknessValue"),
   anchorSpreadValue: document.getElementById("anchorSpreadValue"),
+  framePaddingValue: document.getElementById("framePaddingValue"),
+  frameLiftValue: document.getElementById("frameLiftValue"),
   targetWidthValue: document.getElementById("targetWidthValue"),
   previewZoomValue: document.getElementById("previewZoomValue"),
   iconScaleValue: document.getElementById("iconScaleValue"),
@@ -168,6 +190,7 @@ const scene = {
 
 const tool = new paper.Tool();
 let fontLoadRequestId = 0;
+const unavailableFontKeys = new Set();
 
 function setPreviewMeta(message) {
   ui.previewMeta.textContent = message;
@@ -244,6 +267,20 @@ function setDownloadEnabled(enabled, titleText = "") {
   ui.downloadBtn.title = titleText;
 }
 
+function setFontOptionAvailability(fontKey, available) {
+  const option = ui.fontSelect.querySelector(`option[value="${fontKey}"]`);
+  if (!option) {
+    return;
+  }
+  option.disabled = !available;
+  option.textContent = available ? FONT_LIBRARY[fontKey].name : `${FONT_LIBRARY[fontKey].name} (unavailable)`;
+}
+
+function firstAvailableFontKey(preferredKeys = []) {
+  const ordered = [...preferredKeys, ...BUILTIN_FONT_KEYS.filter((key) => !preferredKeys.includes(key))];
+  return ordered.find((key) => !unavailableFontKeys.has(key)) || null;
+}
+
 function updateReadouts() {
   ui.fontSizeValue.textContent = `${state.fontSize} px`;
   ui.lineHeightValue.textContent = `${state.lineHeight}%`;
@@ -252,6 +289,8 @@ function updateReadouts() {
   ui.stickLengthValue.textContent = `${state.stickLength} px`;
   ui.supportThicknessValue.textContent = `${state.supportThickness} px`;
   ui.anchorSpreadValue.textContent = `${state.anchorSpread}%`;
+  ui.framePaddingValue.textContent = `${state.framePadding} px`;
+  ui.frameLiftValue.textContent = `${state.frameLift} px`;
   ui.targetWidthValue.textContent = formatInches(state.targetWidth);
   ui.previewZoomValue.textContent = `${state.previewZoom}%`;
   ui.iconScaleValue.textContent = `${state.iconScale} px`;
@@ -272,6 +311,8 @@ function syncControlsFromState() {
   ui.anchorSpread.value = state.anchorSpread;
   ui.supportBar.value = state.supportBar ? "on" : "off";
   ui.frameStyle.value = state.frameStyle;
+  ui.framePadding.value = state.framePadding;
+  ui.frameLift.value = state.frameLift;
   ui.targetWidth.value = state.targetWidth;
   ui.previewZoom.value = state.previewZoom;
   ui.gridMode.value = state.gridMode;
@@ -444,6 +485,8 @@ async function ensureFont(fontKey) {
     scene.activeFont = fontCache.get(fontKey);
     scene.outlineFontReady = true;
     scene.lastSuccessfulFontKey = fontKey;
+    unavailableFontKeys.delete(fontKey);
+    setFontOptionAvailability(fontKey, true);
     setFontStatus(`${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return scene.activeFont;
@@ -459,6 +502,8 @@ async function ensureFont(fontKey) {
     scene.activeFont = font;
     scene.outlineFontReady = true;
     scene.lastSuccessfulFontKey = fontKey;
+    unavailableFontKeys.delete(fontKey);
+    setFontOptionAvailability(fontKey, true);
     setFontStatus(`${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return font;
@@ -468,12 +513,21 @@ async function ensureFont(fontKey) {
     }
     const fallbackKey =
       scene.lastSuccessfulFontKey && fontCache.has(scene.lastSuccessfulFontKey) ? scene.lastSuccessfulFontKey : null;
+    unavailableFontKeys.add(fontKey);
+    setFontOptionAvailability(fontKey, false);
     if (fallbackKey) {
       scene.activeFont = fontCache.get(fallbackKey);
       scene.outlineFontReady = true;
+      state.fontKey = fallbackKey;
+      ui.fontSelect.value = fallbackKey;
       setFontStatus(`${FONT_LIBRARY[fontKey].name} unavailable, using ${FONT_LIBRARY[fallbackKey].name}`, "warn");
       setDownloadEnabled(true, "Download welded single-path SVG.");
       return scene.activeFont;
+    }
+    const replacementKey = firstAvailableFontKey(["lilita", "anton", "lobster", "great-vibes"]);
+    if (replacementKey && replacementKey !== fontKey) {
+      state.fontKey = replacementKey;
+      ui.fontSelect.value = replacementKey;
     }
     scene.activeFont = null;
     scene.outlineFontReady = false;
@@ -839,9 +893,36 @@ function ensureAnchors(bounds) {
   }
 
   scene.anchorPositions = scene.anchorPositions.map((anchor, index) => ({
-    x: clamp(anchor.x, bounds.left + 12, bounds.right - 12),
+    x:
+      count === 1
+        ? clamp(anchor.x, bounds.center.x - bounds.width * 0.18, bounds.center.x + bounds.width * 0.18)
+        : clamp(anchor.x, bounds.left + 12, bounds.right - 12),
     y: defaults[index].y,
   }));
+}
+
+function preferredSupportAttachPoint(attachmentTarget, anchorPoint, textBounds) {
+  if (!attachmentTarget) {
+    return new paper.Point(anchorPoint.x, textBounds.bottom - state.supportThickness * 0.35);
+  }
+
+  const offsets = [0, -textBounds.width * 0.06, textBounds.width * 0.06, -textBounds.width * 0.12, textBounds.width * 0.12];
+  let bestPoint = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  offsets.forEach((offsetX) => {
+    const probe = new paper.Point(anchorPoint.x + offsetX, textBounds.bottom + state.supportThickness * 0.8);
+    const targetPoint = attachmentTarget.getNearestPoint(probe);
+    const horizontalBias = Math.abs(targetPoint.x - anchorPoint.x) * 0.55;
+    const hiddenBias = (textBounds.bottom - targetPoint.y) * 0.18;
+    const score = probe.getDistance(targetPoint) + horizontalBias + hiddenBias;
+    if (!bestPoint || score < bestScore) {
+      bestPoint = targetPoint;
+      bestScore = score;
+    }
+  });
+
+  return bestPoint || new paper.Point(anchorPoint.x, textBounds.bottom - state.supportThickness * 0.35);
 }
 
 function buildFrame(textBounds, thickness) {
@@ -849,11 +930,13 @@ function buildFrame(textBounds, thickness) {
     return null;
   }
 
+  const padding = state.framePadding;
+  const lift = state.frameLift;
   const outer = new paper.Rectangle(
-    textBounds.x - 62,
-    textBounds.y - 62,
-    textBounds.width + 124,
-    textBounds.height + 124
+    textBounds.x - padding,
+    textBounds.y - padding + lift,
+    textBounds.width + padding * 2,
+    textBounds.height + padding * 2
   );
   const innerInset = thickness * 1.35;
   const inner = new paper.Rectangle(
@@ -862,19 +945,45 @@ function buildFrame(textBounds, thickness) {
     Math.max(outer.width - innerInset * 2, thickness * 2),
     Math.max(outer.height - innerInset * 2, thickness * 2)
   );
-  const ellipse = new paper.Path.Ellipse({
-    rectangle: outer,
-    insert: false,
-  });
-  const innerEllipse = new paper.Path.Ellipse({
-    rectangle: inner,
-    insert: false,
-  });
-  const frameRing = ellipse.subtract(innerEllipse, { insert: false });
-  ellipse.remove();
-  innerEllipse.remove();
+  const frameParts = [];
 
-  const frameParts = [frameRing];
+  let outerShape;
+  let innerShape;
+
+  if (state.frameStyle === "rounded-square") {
+    outerShape = new paper.Path.Rectangle({
+      rectangle: outer,
+      radius: Math.min(outer.width, outer.height) * 0.18,
+      insert: false,
+    });
+    innerShape = new paper.Path.Rectangle({
+      rectangle: inner,
+      radius: Math.min(inner.width, inner.height) * 0.18,
+      insert: false,
+    });
+  } else {
+    const ellipseRect =
+      state.frameStyle === "oval"
+        ? new paper.Rectangle(outer.x - padding * 0.18, outer.y, outer.width + padding * 0.36, outer.height)
+        : outer;
+    const innerEllipseRect =
+      state.frameStyle === "oval"
+        ? new paper.Rectangle(inner.x - padding * 0.14, inner.y, inner.width + padding * 0.28, inner.height)
+        : inner;
+    outerShape = new paper.Path.Ellipse({
+      rectangle: ellipseRect,
+      insert: false,
+    });
+    innerShape = new paper.Path.Ellipse({
+      rectangle: innerEllipseRect,
+      insert: false,
+    });
+  }
+
+  const frameRing = outerShape.subtract(innerShape, { insert: false });
+  outerShape.remove();
+  innerShape.remove();
+  frameParts.push(frameRing);
 
   if (state.frameStyle === "scallop") {
     const orbit = new paper.Path.Ellipse({
@@ -1158,16 +1267,28 @@ function snapIconCenter(point, snapTarget) {
   return point;
 }
 
-function buildSupports(textBounds) {
+function buildSupports(textBounds, attachmentTarget) {
   ensureAnchors(textBounds);
   const pieces = [];
   const guidePieces = [];
-  const anchorTopY = textBounds.bottom - state.supportThickness * 0.35;
+  const jointRadius = Math.max(state.supportThickness * 0.52, 5.5);
+  const barY = state.supportBar
+    ? textBounds.bottom + Math.max(state.stickLength * 0.34, state.supportThickness * 2.1)
+    : null;
 
   scene.anchorPositions.forEach((anchor) => {
     const anchorPoint = new paper.Point(anchor.x, anchor.y);
-    const topPoint = new paper.Point(anchor.x, anchorTopY);
+    const topPoint = preferredSupportAttachPoint(attachmentTarget, anchorPoint, textBounds);
     pieces.push(stickShape(anchorPoint, topPoint, state.supportThickness));
+    if (barY !== null) {
+      pieces.push(
+        new paper.Path.Circle({
+          center: new paper.Point(anchor.x, barY),
+          radius: jointRadius,
+          insert: false,
+        })
+      );
+    }
     guidePieces.push(
       new paper.Path.Line({
         from: anchorPoint,
@@ -1186,10 +1307,9 @@ function buildSupports(textBounds) {
     const rightX = scene.anchorPositions.length
       ? Math.max(...scene.anchorPositions.map((anchor) => anchor.x))
       : textBounds.right - textBounds.width * 0.12;
-    const barY = textBounds.bottom + Math.max(state.stickLength * 0.34, state.supportThickness * 2);
     const bar = roundedSegment(
-      new paper.Point(leftX, barY),
-      new paper.Point(rightX, barY),
+      new paper.Point(leftX - state.supportThickness * 0.2, barY),
+      new paper.Point(rightX + state.supportThickness * 0.2, barY),
       state.supportThickness
     );
     pieces.push(bar);
@@ -1237,7 +1357,7 @@ function drawAnchorHandles() {
     const center = new paper.Point(anchor.x, anchor.y);
     const halo = new paper.Path.Circle({
       center,
-      radius: 16,
+      radius: 10,
       fillColor: "rgba(178, 74, 47, 0.14)",
     });
     halo.data.kind = "anchor";
@@ -1245,7 +1365,7 @@ function drawAnchorHandles() {
 
     const handle = new paper.Path.Circle({
       center,
-      radius: 8,
+      radius: 5,
       fillColor: "#b24a2f",
       strokeColor: "#ffffff",
       strokeWidth: 2,
@@ -1254,11 +1374,11 @@ function drawAnchorHandles() {
     handle.data.index = index;
 
     const label = new paper.PointText({
-      point: center.add([0, -20]),
+      point: center.add([0, -14]),
       content: scene.anchorPositions.length === 1 ? "S" : index === 0 ? "L" : "R",
       justification: "center",
       fillColor: "#6e331f",
-      fontSize: 12,
+      fontSize: 10,
       fontWeight: "bold",
     });
     label.position.x = center.x;
@@ -1369,6 +1489,8 @@ function buildFrameConnectors(textArtwork, frameArtwork, thickness) {
   const targets = [
     new paper.Point(textBounds.left, textBounds.center.y),
     new paper.Point(textBounds.right, textBounds.center.y),
+    new paper.Point(textBounds.center.x, textBounds.top),
+    new paper.Point(textBounds.center.x, textBounds.bottom),
   ];
 
   const connectors = targets.map((target) => {
@@ -1459,7 +1581,9 @@ function renderScene() {
     drawScaleGrid(textArtwork.bounds);
     const textBounds = textArtwork.bounds.clone();
     const frameArtwork = buildFrame(textBounds, state.supportThickness);
-    const supports = buildSupports(textBounds);
+    const supportAttachmentTarget = unionItems([textArtwork.clone(false), frameArtwork?.clone(false)].filter(Boolean));
+    const supports = buildSupports(textBounds, supportAttachmentTarget);
+    supportAttachmentTarget?.remove();
     const frameConnectors = buildFrameConnectors(textArtwork, frameArtwork, state.supportThickness);
     const snapBase = unionItems(
       [textArtwork.clone(false), frameArtwork?.clone(false), frameConnectors?.clone(false), supports.welded?.clone(false)].filter(Boolean)
@@ -1622,7 +1746,15 @@ function dragAnchor(index, point) {
   }
 
   const bounds = scene.artworkForExport.bounds;
-  scene.anchorPositions[index].x = clamp(Math.round(point.x / 10) * 10, bounds.left + 8, bounds.right - 8);
+  const clampedX =
+    scene.anchorPositions.length === 1
+      ? clamp(
+          Math.round(point.x / 10) * 10,
+          bounds.center.x - bounds.width * 0.18,
+          bounds.center.x + bounds.width * 0.18
+        )
+      : clamp(Math.round(point.x / 10) * 10, bounds.left + 8, bounds.right - 8);
+  scene.anchorPositions[index].x = clampedX;
   if (scene.anchorPositions.length === 2) {
     const left = Math.min(scene.anchorPositions[0].x, scene.anchorPositions[1].x);
     const right = Math.max(scene.anchorPositions[0].x, scene.anchorPositions[1].x);
@@ -1754,6 +1886,8 @@ function bindEvents() {
   bindInput(ui.stickLength, "stickLength");
   bindInput(ui.supportThickness, "supportThickness");
   bindInput(ui.anchorSpread, "anchorSpread");
+  bindInput(ui.framePadding, "framePadding");
+  bindInput(ui.frameLift, "frameLift");
   bindInput(ui.targetWidth, "targetWidth", Number);
   bindInput(ui.previewZoom, "previewZoom", Number);
   ui.gridMode.addEventListener("change", () => {
