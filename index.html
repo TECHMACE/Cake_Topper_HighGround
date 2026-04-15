@@ -26,6 +26,11 @@
           </p>
         </div>
 
+        <section class="status-strip">
+          <span id="topFontStatus" class="status-pill">Loading font...</span>
+          <span id="topConnectionStatus" class="status-pill neutral">Checking weld safety</span>
+        </section>
+
         <section class="panel-section">
           <div class="section-head">
             <h2>Typography</h2>
@@ -222,9 +227,12 @@ Birthday</textarea>
 
           <div class="toggle-row">
             <button id="addIconBtn" type="button" class="secondary-btn">Add icon</button>
+            <button id="removeIconBtn" type="button" class="secondary-btn">Remove selected</button>
+            <button id="clearIconsBtn" type="button" class="secondary-btn">Clear icons</button>
             <button id="resetAnchorsBtn" type="button" class="secondary-btn">Reset anchors</button>
             <button id="downloadBtn" type="button" class="primary-btn">Download SVG</button>
           </div>
+          <p id="iconSelectionStatus" class="helper-text">No icon selected. Added icons will appear near the topper and can be dragged.</p>
           <p class="helper-text">
             “Add icon” places the selected built-in decoration into the preview. Then drag it onto the topper until it snaps into place and gets welded into the final cut shape.
           </p>

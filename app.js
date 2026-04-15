@@ -72,6 +72,7 @@ const DEFAULT_STATE = {
   weldSupports: true,
   iconScale: 40,
   icons: [],
+  selectedIconIndex: null,
 };
 
 const state = { ...DEFAULT_STATE };
@@ -100,10 +101,14 @@ const ui = {
   iconSelect: document.getElementById("iconSelect"),
   iconScale: document.getElementById("iconScale"),
   addIconBtn: document.getElementById("addIconBtn"),
+  removeIconBtn: document.getElementById("removeIconBtn"),
+  clearIconsBtn: document.getElementById("clearIconsBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
   resetAnchorsBtn: document.getElementById("resetAnchorsBtn"),
   fontStatus: document.getElementById("fontStatus"),
+  topFontStatus: document.getElementById("topFontStatus"),
   connectionStatus: document.getElementById("connectionStatus"),
+  topConnectionStatus: document.getElementById("topConnectionStatus"),
   physicalSize: document.getElementById("physicalSize"),
   physicalMetric: document.getElementById("physicalMetric"),
   fontSizeValue: document.getElementById("fontSizeValue"),
@@ -115,6 +120,7 @@ const ui = {
   targetWidthValue: document.getElementById("targetWidthValue"),
   iconScaleValue: document.getElementById("iconScaleValue"),
   previewMeta: document.getElementById("previewMeta"),
+  iconSelectionStatus: document.getElementById("iconSelectionStatus"),
 };
 
 const scene = {
@@ -135,6 +141,27 @@ let fontLoadRequestId = 0;
 
 function setPreviewMeta(message) {
   ui.previewMeta.textContent = message;
+}
+
+function setStatusGroup(elements, message, tone) {
+  elements.filter(Boolean).forEach((element) => setStatus(element, message, tone));
+}
+
+function setFontStatus(message, tone) {
+  setStatusGroup([ui.fontStatus, ui.topFontStatus], message, tone);
+}
+
+function setConnectionStatus(message, tone) {
+  setStatusGroup([ui.connectionStatus, ui.topConnectionStatus], message, tone);
+}
+
+function updateSelectedIconStatus() {
+  if (state.selectedIconIndex === null || !state.icons[state.selectedIconIndex]) {
+    ui.iconSelectionStatus.textContent = "No icon selected. Added icons will appear near the topper and can be dragged.";
+    return;
+  }
+  const icon = state.icons[state.selectedIconIndex];
+  ui.iconSelectionStatus.textContent = `Selected ${icon.type} icon at ${Math.round(icon.size)} px. Drag it, resize it with the slider, or remove it.`;
 }
 
 function clamp(value, min, max) {
@@ -214,6 +241,7 @@ function syncControlsFromState() {
   ui.iconScale.value = state.iconScale;
   setDownloadEnabled(false, "Load or upload an outline font to export SVG.");
   updateReadouts();
+  updateSelectedIconStatus();
 }
 
 function clearCanvas() {
@@ -308,12 +336,12 @@ async function ensureFont(fontKey) {
   if (fontCache.has(fontKey)) {
     scene.activeFont = fontCache.get(fontKey);
     scene.outlineFontReady = true;
-    setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
+    setFontStatus(`${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return scene.activeFont;
   }
 
-  setStatus(ui.fontStatus, `Loading ${FONT_LIBRARY[fontKey].name}...`, "warn");
+  setFontStatus(`Loading ${FONT_LIBRARY[fontKey].name}...`, "warn");
   try {
     const font = await withTimeout(loadFont(fontKey), 3500, "Remote font load took too long");
     if (requestId !== fontLoadRequestId) {
@@ -322,7 +350,7 @@ async function ensureFont(fontKey) {
     fontCache.set(fontKey, font);
     scene.activeFont = font;
     scene.outlineFontReady = true;
-    setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
+    setFontStatus(`${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setDownloadEnabled(true, "Download welded single-path SVG.");
     return font;
   } catch (error) {
@@ -331,7 +359,7 @@ async function ensureFont(fontKey) {
     }
     scene.activeFont = null;
     scene.outlineFontReady = false;
-    setStatus(ui.fontStatus, "Remote font unavailable", "warn");
+    setFontStatus("Remote font unavailable", "warn");
     setDownloadEnabled(false, "Upload a .ttf or .otf font for export-ready outlines.");
     return null;
   }
@@ -871,10 +899,12 @@ function ensureIcons(textBounds) {
       return icon;
     }
 
-    const defaultPoint =
-      index % 2 === 0
-        ? new paper.Point(textBounds.right + 28, textBounds.top + 24 + index * 14)
-        : new paper.Point(textBounds.left - 28, textBounds.top + 24 + index * 14);
+    const column = index % 3;
+    const row = Math.floor(index / 3);
+    const defaultPoint = new paper.Point(
+      textBounds.center.x + (column - 1) * 42,
+      textBounds.top + 30 + row * 36
+    );
 
     return {
       ...icon,
@@ -899,12 +929,24 @@ function buildIconArtwork(snapTarget) {
     state.icons[index].x = snappedCenter.x;
     state.icons[index].y = snappedCenter.y;
     shape.position = snappedCenter;
-    weldedShapes.push(shape.clone(false));
+    const weldedShape = shape.clone(false);
+    weldedShapes.push(weldedShape);
 
-    shape.fillColor = "rgba(47, 93, 125, 0.28)";
-    shape.strokeColor = "#2f5d7d";
-    shape.strokeWidth = 1;
-    shape.data.iconIndex = index;
+    if (snapTarget && !weldedShape.intersects(snapTarget)) {
+      const iconPoint = weldedShape.getNearestPoint(snapTarget.bounds.center);
+      const targetPoint = snapTarget.getNearestPoint(iconPoint);
+      const bridge = roundedSegment(iconPoint, targetPoint, Math.max(state.supportThickness * 0.7, 7));
+      weldedShapes.push(bridge);
+
+      const bridgeGuide = roundedSegment(iconPoint, targetPoint, Math.max(state.supportThickness * 0.24, 3));
+      bridgeGuide.fillColor = "rgba(47, 93, 125, 0.16)";
+      bridgeGuide.strokeColor = null;
+      overlayShapes.push(bridgeGuide);
+    }
+
+    shape.fillColor = state.selectedIconIndex === index ? "rgba(47, 93, 125, 0.44)" : "rgba(47, 93, 125, 0.28)";
+    shape.strokeColor = state.selectedIconIndex === index ? "#173446" : "#2f5d7d";
+    shape.strokeWidth = state.selectedIconIndex === index ? 2 : 1;
     overlayShapes.push(shape);
   });
 
@@ -1041,11 +1083,25 @@ function drawIcons(draggableIcons) {
   }
 
   const layer = new paper.Group({ children: draggableIcons });
-  layer.children.forEach((child, index) => {
-    child.data.kind = "icon";
-    child.data.index = index;
+  layer.children.forEach((child) => {
+    if (child.strokeColor) {
+      const matchIndex = state.icons.findIndex(
+        (icon) => Math.abs(child.position.x - icon.x) < 2 && Math.abs(child.position.y - icon.y) < 2
+      );
+      if (matchIndex >= 0) {
+        markIconHitTargets(child, matchIndex);
+      }
+    }
   });
   scene.iconLayer = layer;
+}
+
+function markIconHitTargets(item, index) {
+  item.data.kind = "icon";
+  item.data.index = index;
+  if (item.children) {
+    item.children.forEach((child) => markIconHitTargets(child, index));
+  }
 }
 
 function updatePhysicalSize(bounds) {
@@ -1064,16 +1120,16 @@ function updatePhysicalSize(bounds) {
 
 function updateConnectionStatus(islandCount, bridgesAdded) {
   if (!islandCount) {
-    setStatus(ui.connectionStatus, "Safe: single connected cut shape", "ok");
+    setConnectionStatus("Safe: single connected cut shape", "ok");
     return;
   }
 
   if (bridgesAdded > 0) {
-    setStatus(ui.connectionStatus, `Auto-bridged ${bridgesAdded} floating island(s)`, "ok");
+    setConnectionStatus(`Auto-bridged ${bridgesAdded} floating island(s)`, "ok");
     return;
   }
 
-  setStatus(ui.connectionStatus, `${islandCount} disconnected island(s) detected`, "warn");
+  setConnectionStatus(`${islandCount} disconnected island(s) detected`, "warn");
 }
 
 function thicknessInMillimeters(bounds, pixelThickness) {
@@ -1195,7 +1251,7 @@ function renderScene() {
       scene.artworkForExport = null;
       scene.silhouettePreview = previewGroup;
       updatePhysicalSize(previewGroup ? previewGroup.bounds : null);
-      setStatus(ui.connectionStatus, "Preview only: upload a font for export-ready outlines", "warn");
+      setConnectionStatus("Preview only: upload a font for export-ready outlines", "warn");
       setPreviewMeta(
         `Canvas ${Math.round(paper.view.bounds.width)} x ${Math.round(paper.view.bounds.height)} px. Remote font unavailable, fallback preview shown.`
       );
@@ -1264,7 +1320,7 @@ function renderScene() {
     updatePhysicalSize(scene.artworkForExport.bounds);
     updateConnectionStatus(islandCount, bridgesAdded);
     const readiness = assessCutReadiness(scene.artworkForExport.bounds, islandCount);
-    setStatus(ui.connectionStatus, `${ui.connectionStatus.textContent} • ${readiness.message}`, readiness.tone);
+    setConnectionStatus(`${ui.connectionStatus.textContent} • ${readiness.message}`, readiness.tone);
     setPreviewMeta(
       `Canvas ${Math.round(paper.view.bounds.width)} x ${Math.round(paper.view.bounds.height)} px. Rendered topper bounds ${Math.round(
         scene.artworkForExport.bounds.width
@@ -1274,7 +1330,7 @@ function renderScene() {
     paper.view.draw();
   } catch (error) {
     console.error(error);
-    setStatus(ui.connectionStatus, "Preview error", "error");
+    setConnectionStatus("Preview error", "error");
     setPreviewMeta(`Render failed: ${error.message || "Unknown error"}`);
     renderFallback("Preview failed. See status above.");
   }
@@ -1304,7 +1360,7 @@ function buildExportSvg() {
 function downloadSvg() {
   const svg = buildExportSvg();
   if (!svg) {
-    setStatus(ui.connectionStatus, "Upload a .ttf or .otf font before exporting", "warn");
+    setConnectionStatus("Upload a .ttf or .otf font before exporting", "warn");
     return;
   }
 
@@ -1330,6 +1386,25 @@ function addIcon() {
     type: ui.iconSelect.value,
     size: state.iconScale,
   });
+  state.selectedIconIndex = state.icons.length - 1;
+  updateSelectedIconStatus();
+  renderScene();
+}
+
+function removeSelectedIcon() {
+  if (state.selectedIconIndex === null || !state.icons[state.selectedIconIndex]) {
+    return;
+  }
+  state.icons.splice(state.selectedIconIndex, 1);
+  state.selectedIconIndex = state.icons.length ? Math.max(0, state.selectedIconIndex - 1) : null;
+  updateSelectedIconStatus();
+  renderScene();
+}
+
+function clearIcons() {
+  state.icons = [];
+  state.selectedIconIndex = null;
+  updateSelectedIconStatus();
   renderScene();
 }
 
@@ -1377,8 +1452,14 @@ tool.onMouseDown = (event) => {
 
   if (data.kind === "icon" && state.icons[data.index]) {
     const icon = state.icons[data.index];
+    state.selectedIconIndex = data.index;
+    state.iconScale = icon.size;
+    ui.iconScale.value = icon.size;
+    updateReadouts();
+    updateSelectedIconStatus();
     scene.dragTarget = { kind: "icon", index: data.index };
     scene.dragOffset = event.point.subtract(new paper.Point(icon.x, icon.y));
+    renderScene();
   }
 };
 
@@ -1403,7 +1484,7 @@ tool.onMouseUp = () => {
 };
 
 window.addEventListener("error", (event) => {
-  setStatus(ui.connectionStatus, "Preview error", "error");
+  setConnectionStatus("Preview error", "error");
 });
 
 function bindInput(element, stateKey, transformer = Number) {
@@ -1442,13 +1523,13 @@ function bindEvents() {
       scene.activeFont = font;
       scene.outlineFontReady = true;
       state.fontKey = BUILTIN_FONT_KEYS.includes(state.fontKey) ? state.fontKey : customKey;
-      setStatus(ui.fontStatus, `${file.name} ready`, "ok");
+      setFontStatus(`${file.name} ready`, "ok");
       setDownloadEnabled(true, "Download welded single-path SVG.");
       renderScene();
     } catch (error) {
       scene.activeFont = null;
       scene.outlineFontReady = false;
-      setStatus(ui.fontStatus, "Uploaded font could not be parsed", "error");
+      setFontStatus("Uploaded font could not be parsed", "error");
       setDownloadEnabled(false, "Upload a valid .ttf or .otf font.");
       renderScene();
     }
@@ -1466,7 +1547,15 @@ function bindEvents() {
   bindInput(ui.stickLength, "stickLength");
   bindInput(ui.supportThickness, "supportThickness");
   bindInput(ui.targetWidth, "targetWidth", Number);
-  bindInput(ui.iconScale, "iconScale", Number);
+  ui.iconScale.addEventListener("input", () => {
+    state.iconScale = Number(ui.iconScale.value);
+    if (state.selectedIconIndex !== null && state.icons[state.selectedIconIndex]) {
+      state.icons[state.selectedIconIndex].size = state.iconScale;
+    }
+    updateReadouts();
+    updateSelectedIconStatus();
+    renderScene();
+  });
 
   ui.stickCount.addEventListener("change", () => {
     state.stickCount = Number(ui.stickCount.value);
@@ -1500,6 +1589,8 @@ function bindEvents() {
   });
 
   ui.addIconBtn.addEventListener("click", addIcon);
+  ui.removeIconBtn.addEventListener("click", removeSelectedIcon);
+  ui.clearIconsBtn.addEventListener("click", clearIcons);
   ui.resetAnchorsBtn.addEventListener("click", resetAnchors);
   ui.downloadBtn.addEventListener("click", downloadSvg);
 
