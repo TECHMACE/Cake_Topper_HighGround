@@ -47,10 +47,12 @@ const DEFAULT_STATE = {
 
 const state = { ...DEFAULT_STATE };
 const fontCache = new Map();
+const BUILTIN_FONT_KEYS = Object.keys(FONT_LIBRARY);
 
 const ui = {
   messageInput: document.getElementById("messageInput"),
   fontSelect: document.getElementById("fontSelect"),
+  fontUpload: document.getElementById("fontUpload"),
   layoutMode: document.getElementById("layoutMode"),
   fontSize: document.getElementById("fontSize"),
   lineHeight: document.getElementById("lineHeight"),
@@ -90,6 +92,7 @@ const ui = {
 
 const scene = {
   activeFont: null,
+  outlineFontReady: false,
   artworkForExport: null,
   silhouettePreview: null,
   guideLayer: null,
@@ -155,6 +158,13 @@ function setPreviewOverlay(visible, title, detail, progress = null) {
   }
 }
 
+function setDownloadEnabled(enabled, titleText = "") {
+  ui.downloadBtn.disabled = !enabled;
+  ui.downloadBtn.style.opacity = enabled ? "1" : "0.6";
+  ui.downloadBtn.style.cursor = enabled ? "pointer" : "not-allowed";
+  ui.downloadBtn.title = titleText;
+}
+
 function updateReadouts() {
   ui.fontSizeValue.textContent = `${state.fontSize} px`;
   ui.lineHeightValue.textContent = `${state.lineHeight}%`;
@@ -184,11 +194,28 @@ function syncControlsFromState() {
   ui.autoBridgeIslands.checked = state.autoBridgeIslands;
   ui.weldSupports.checked = state.weldSupports;
   ui.iconScale.value = state.iconScale;
+  setDownloadEnabled(false, "Load or upload an outline font to export SVG.");
   updateReadouts();
 }
 
 function clearCanvas() {
   paper.project.activeLayer.removeChildren();
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
 }
 
 function loadFont(fontKey) {
@@ -239,32 +266,54 @@ async function ensureFont(fontKey) {
   const requestId = ++fontLoadRequestId;
   if (fontCache.has(fontKey)) {
     scene.activeFont = fontCache.get(fontKey);
+    scene.outlineFontReady = true;
     setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setPreviewOverlay(false);
+    setDownloadEnabled(true, "Download welded single-path SVG.");
     return scene.activeFont;
   }
 
   setStatus(ui.fontStatus, `Loading ${FONT_LIBRARY[fontKey].name}...`);
   setPreviewOverlay(true, `Loading ${FONT_LIBRARY[fontKey].name}…`, "Downloading font outlines.", 18);
   try {
-    const font = await loadFont(fontKey);
+    const font = await withTimeout(loadFont(fontKey), 3500, "Remote font load took too long");
     if (requestId !== fontLoadRequestId) {
       return scene.activeFont;
     }
     fontCache.set(fontKey, font);
     scene.activeFont = font;
+    scene.outlineFontReady = true;
     setStatus(ui.fontStatus, `${FONT_LIBRARY[fontKey].name} ready`, "ok");
     setPreviewOverlay(true, "Building preview…", "Welding outlines into a single cut shape.", 82);
+    setDownloadEnabled(true, "Download welded single-path SVG.");
     return font;
   } catch (error) {
     if (requestId !== fontLoadRequestId) {
       return scene.activeFont;
     }
     scene.activeFont = null;
-    setStatus(ui.fontStatus, "Font load failed, using fallback preview", "warn");
-    setPreviewOverlay(true, "Font load failed", "Showing fallback preview so you can keep working.", 100);
+    scene.outlineFontReady = false;
+    setStatus(ui.fontStatus, "Remote font unavailable", "warn");
+    setPreviewOverlay(false);
+    setDownloadEnabled(false, "Upload a .ttf or .otf font for export-ready outlines.");
     return null;
   }
+}
+
+function loadUploadedFont(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const font = opentype.parse(reader.result);
+        resolve(font);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => reject(new Error("Unable to read selected font file"));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 function roundedSegment(from, to, thickness) {
@@ -482,37 +531,7 @@ function buildLineGlyphs(lineText, baselineY) {
 
 function buildTextArtwork() {
   if (!scene.activeFont) {
-    const fallbackLines = (state.message || "Happy Birthday")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    if (!fallbackLines.length) {
-      return null;
-    }
-
-    const fallbackItems = [];
-    const lineStep = state.fontSize * (state.lineHeight / 100);
-    const centerOffset = (fallbackLines.length - 1) / 2;
-
-    fallbackLines.forEach((line, index) => {
-      const text = new paper.PointText({
-        point: new paper.Point(0, (index - centerOffset) * lineStep),
-        content: line,
-        justification: "center",
-        fontFamily: "Georgia",
-        fontSize: state.fontSize,
-        fillColor: "#1d130d",
-        insert: false,
-      });
-      const path = text.toPath();
-      text.remove();
-      if (path) {
-        fallbackItems.push(path);
-      }
-    });
-
-    return unionItems(fallbackItems);
+    return null;
   }
 
   const lines = (state.message || "Happy Birthday")
@@ -649,6 +668,139 @@ function iconShape(type, size) {
       radius1: size * 0.52,
       radius2: size * 0.22,
       insert: false,
+    });
+  }
+
+  if (type === "crown") {
+    return new paper.Path({
+      closed: true,
+      insert: false,
+      segments: [
+        new paper.Point(-size * 0.5, size * 0.34),
+        new paper.Point(-size * 0.5, -size * 0.16),
+        new paper.Point(-size * 0.24, 0),
+        new paper.Point(0, -size * 0.42),
+        new paper.Point(size * 0.24, 0),
+        new paper.Point(size * 0.5, -size * 0.16),
+        new paper.Point(size * 0.5, size * 0.34),
+      ],
+    });
+  }
+
+  if (type === "bow") {
+    const left = new paper.Path.Ellipse({
+      rectangle: new paper.Rectangle(-size * 0.52, -size * 0.22, size * 0.42, size * 0.3),
+      insert: false,
+    });
+    const right = new paper.Path.Ellipse({
+      rectangle: new paper.Rectangle(size * 0.1, -size * 0.22, size * 0.42, size * 0.3),
+      insert: false,
+    });
+    const knot = new paper.Path.Circle({ center: [0, -size * 0.02], radius: size * 0.1, insert: false });
+    const tailLeft = new paper.Path({
+      closed: true,
+      insert: false,
+      segments: [
+        new paper.Point(-size * 0.14, size * 0.06),
+        new paper.Point(-size * 0.34, size * 0.5),
+        new paper.Point(-size * 0.02, size * 0.22),
+      ],
+    });
+    const tailRight = new paper.Path({
+      closed: true,
+      insert: false,
+      segments: [
+        new paper.Point(size * 0.14, size * 0.06),
+        new paper.Point(size * 0.34, size * 0.5),
+        new paper.Point(size * 0.02, size * 0.22),
+      ],
+    });
+    return unionItems([left, right, knot, tailLeft, tailRight]);
+  }
+
+  if (type === "cross") {
+    return unionItems([
+      new paper.Path.Rectangle({ point: [-size * 0.1, -size * 0.5], size: [size * 0.2, size], insert: false }),
+      new paper.Path.Rectangle({ point: [-size * 0.34, -size * 0.12], size: [size * 0.68, size * 0.2], insert: false }),
+    ]);
+  }
+
+  if (type === "moon") {
+    const outer = new paper.Path.Circle({ center: [0, 0], radius: size * 0.34, insert: false });
+    const cut = new paper.Path.Circle({ center: [size * 0.16, -size * 0.04], radius: size * 0.28, insert: false });
+    const moon = outer.subtract(cut, { insert: false });
+    outer.remove();
+    cut.remove();
+    return moon;
+  }
+
+  if (type === "flower") {
+    const petals = [];
+    for (let index = 0; index < 6; index += 1) {
+      const angle = (Math.PI * 2 * index) / 6;
+      petals.push(
+        new paper.Path.Circle({
+          center: [Math.cos(angle) * size * 0.24, Math.sin(angle) * size * 0.24],
+          radius: size * 0.17,
+          insert: false,
+        })
+      );
+    }
+    const center = new paper.Path.Circle({ center: [0, 0], radius: size * 0.12, insert: false });
+    return unionItems([...petals, center]);
+  }
+
+  if (type === "butterfly") {
+    const leftTop = new paper.Path.Ellipse({
+      rectangle: new paper.Rectangle(-size * 0.52, -size * 0.42, size * 0.32, size * 0.28),
+      insert: false,
+    });
+    const leftBottom = new paper.Path.Ellipse({
+      rectangle: new paper.Rectangle(-size * 0.46, -size * 0.08, size * 0.24, size * 0.34),
+      insert: false,
+    });
+    const rightTop = new paper.Path.Ellipse({
+      rectangle: new paper.Rectangle(size * 0.2, -size * 0.42, size * 0.32, size * 0.28),
+      insert: false,
+    });
+    const rightBottom = new paper.Path.Ellipse({
+      rectangle: new paper.Rectangle(size * 0.22, -size * 0.08, size * 0.24, size * 0.34),
+      insert: false,
+    });
+    const body = new paper.Path.Rectangle({
+      point: [-size * 0.04, -size * 0.34],
+      size: [size * 0.08, size * 0.68],
+      radius: size * 0.04,
+      insert: false,
+    });
+    return unionItems([leftTop, leftBottom, rightTop, rightBottom, body]);
+  }
+
+  if (type === "diamond") {
+    return new paper.Path({
+      closed: true,
+      insert: false,
+      segments: [
+        new paper.Point(0, -size * 0.46),
+        new paper.Point(size * 0.4, 0),
+        new paper.Point(0, size * 0.46),
+        new paper.Point(-size * 0.4, 0),
+      ],
+    });
+  }
+
+  if (type === "lightning") {
+    return new paper.Path({
+      closed: true,
+      insert: false,
+      segments: [
+        new paper.Point(-size * 0.12, -size * 0.48),
+        new paper.Point(size * 0.1, -size * 0.14),
+        new paper.Point(-size * 0.02, -size * 0.14),
+        new paper.Point(size * 0.16, size * 0.48),
+        new paper.Point(-size * 0.1, size * 0.08),
+        new paper.Point(size * 0.02, size * 0.08),
+      ],
     });
   }
 
@@ -952,16 +1104,58 @@ function renderFallback(message) {
   });
 }
 
+function renderPreviewOnlyText() {
+  clearCanvas();
+  const lines = (state.message || "Happy Birthday")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    renderFallback("Type your topper text to start.");
+    return null;
+  }
+
+  const group = new paper.Group();
+  const lineStep = state.fontSize * (state.lineHeight / 100);
+  const centerOffset = (lines.length - 1) / 2;
+
+  lines.forEach((line, index) => {
+    const item = new paper.PointText({
+      point: new paper.Point(0, (index - centerOffset) * lineStep),
+      content: line,
+      justification: "center",
+      fontFamily: "Georgia",
+      fontWeight: "bold",
+      fontSize: state.fontSize,
+      fillColor: "#1d130d",
+    });
+    group.addChild(item);
+  });
+
+  const viewBounds = paper.view.bounds;
+  const usableWidth = viewBounds.width * 0.75;
+  const usableHeight = viewBounds.height * 0.5;
+  const sourceBounds = group.bounds;
+  const scale = Math.min(usableWidth / Math.max(sourceBounds.width, 1), usableHeight / Math.max(sourceBounds.height, 1));
+  group.scale(scale);
+  group.position = new paper.Point(viewBounds.center.x, viewBounds.center.y - 24);
+  return group;
+}
+
 function renderScene() {
   try {
     clearCanvas();
 
     const textArtwork = buildTextArtwork();
     if (!textArtwork) {
-      renderFallback("Unable to build text outlines.");
-      updatePhysicalSize(null);
-      updateConnectionStatus(0, 0);
+      const previewGroup = renderPreviewOnlyText();
+      scene.artworkForExport = null;
+      scene.silhouettePreview = previewGroup;
+      updatePhysicalSize(previewGroup ? previewGroup.bounds : null);
+      setStatus(ui.connectionStatus, "Preview only: upload a font for export-ready outlines", "warn");
       setPreviewOverlay(false);
+      paper.view.update();
       return;
     }
 
@@ -1034,7 +1228,7 @@ function renderScene() {
 }
 
 function buildExportSvg() {
-  if (!scene.artworkForExport) {
+  if (!scene.artworkForExport || !scene.outlineFontReady) {
     return null;
   }
 
@@ -1057,7 +1251,7 @@ function buildExportSvg() {
 function downloadSvg() {
   const svg = buildExportSvg();
   if (!svg) {
-    setStatus(ui.connectionStatus, "Nothing to export yet", "error");
+    setStatus(ui.connectionStatus, "Upload a .ttf or .otf font before exporting", "warn");
     return;
   }
 
@@ -1177,9 +1371,39 @@ function bindEvents() {
   ui.fontSelect.addEventListener("change", async () => {
     state.fontKey = ui.fontSelect.value;
     scene.activeFont = null;
+    scene.outlineFontReady = false;
     renderScene();
     await ensureFont(state.fontKey);
     renderScene();
+  });
+
+  ui.fontUpload.addEventListener("change", async () => {
+    const [file] = ui.fontUpload.files || [];
+    if (!file) {
+      return;
+    }
+
+    setPreviewOverlay(true, "Loading local font…", `Parsing ${file.name}`, 40);
+    try {
+      const font = await loadUploadedFont(file);
+      const customKey = `uploaded:${file.name}`;
+      fontCache.set(customKey, font);
+      scene.activeFont = font;
+      scene.outlineFontReady = true;
+      state.fontKey = BUILTIN_FONT_KEYS.includes(state.fontKey) ? state.fontKey : customKey;
+      setStatus(ui.fontStatus, `${file.name} ready`, "ok");
+      setDownloadEnabled(true, "Download welded single-path SVG.");
+      setPreviewOverlay(true, "Building preview…", "Using your uploaded local font for outlines.", 86);
+      renderScene();
+      setPreviewOverlay(false);
+    } catch (error) {
+      scene.activeFont = null;
+      scene.outlineFontReady = false;
+      setStatus(ui.fontStatus, "Uploaded font could not be parsed", "error");
+      setDownloadEnabled(false, "Upload a valid .ttf or .otf font.");
+      setPreviewOverlay(false);
+      renderScene();
+    }
   });
 
   ui.layoutMode.addEventListener("change", () => {

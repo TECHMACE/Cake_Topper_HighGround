@@ -188,6 +188,16 @@ input[type="range"] {
   width: 100%;
 }
 
+input[type="file"] {
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px dashed rgba(87, 58, 33, 0.24);
+  background: rgba(255, 255, 255, 0.62);
+  font: inherit;
+  color: var(--ink);
+}
+
 textarea,
 select,
 .metric-box {
@@ -215,6 +225,13 @@ strong {
 
 small {
   color: var(--muted);
+}
+
+.helper-text {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .metric-box {
