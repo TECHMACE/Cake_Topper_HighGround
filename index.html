@@ -51,6 +51,11 @@ Birthday</textarea>
                 <option value="bowlby">Bowlby One SC</option>
                 <option value="fredoka">Fredoka Bold</option>
                 <option value="great-vibes">Great Vibes</option>
+                <option value="anton">Anton</option>
+                <option value="luckiest-guy">Luckiest Guy</option>
+                <option value="lobster">Lobster</option>
+                <option value="passion-one">Passion One Bold</option>
+                <option value="pacifico">Pacifico</option>
               </select>
             </label>
 
@@ -67,7 +72,7 @@ Birthday</textarea>
           <label class="field">
             <span>Upload Your Own Font (.ttf or .otf)</span>
             <input id="fontUpload" type="file" accept=".ttf,.otf,font/ttf,font/otf" />
-            <small>Use this when you want reliable local outline generation without waiting on a remote font.</small>
+            <small>Fastest local option: choose any font file already on your computer. Browsers usually cannot browse installed fonts directly, but they can load exported `.ttf` or `.otf` files instantly.</small>
           </label>
 
           <div class="field-grid">
@@ -196,6 +201,23 @@ Birthday</textarea>
             <label class="checkbox">
               <input id="weldSupports" type="checkbox" checked />
               <span>Weld all geometry into one export path</span>
+            </label>
+          </div>
+
+          <div class="field-grid compact-grid">
+            <label class="field">
+              <span>Preview Zoom</span>
+              <input id="previewZoom" type="range" min="60" max="180" step="5" value="100" />
+              <strong id="previewZoomValue">100%</strong>
+            </label>
+
+            <label class="field">
+              <span>Scale Grid</span>
+              <select id="gridMode">
+                <option value="inch">1 inch grid</option>
+                <option value="half-inch">1/2 inch grid</option>
+                <option value="off">Off</option>
+              </select>
             </label>
           </div>
         </section>

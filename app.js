@@ -50,6 +50,26 @@ const FONT_LIBRARY = {
     name: "Great Vibes",
     url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/greatvibes/GreatVibes-Regular.ttf",
   },
+  anton: {
+    name: "Anton",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/anton/Anton-Regular.ttf",
+  },
+  "luckiest-guy": {
+    name: "Luckiest Guy",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/luckiestguy/LuckiestGuy-Regular.ttf",
+  },
+  lobster: {
+    name: "Lobster",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/lobster/Lobster-Regular.ttf",
+  },
+  "passion-one": {
+    name: "Passion One Bold",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/passionone/PassionOne-Bold.ttf",
+  },
+  pacifico: {
+    name: "Pacifico",
+    url: "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/pacifico/Pacifico-Regular.ttf",
+  },
 };
 
 const DEFAULT_STATE = {
@@ -68,6 +88,8 @@ const DEFAULT_STATE = {
   frameStyle: "none",
   anchorSpread: 18,
   targetWidth: 7,
+  previewZoom: 100,
+  gridMode: "inch",
   autoBridgeIslands: true,
   weldSupports: true,
   iconScale: 40,
@@ -97,6 +119,8 @@ const ui = {
   supportBar: document.getElementById("supportBar"),
   frameStyle: document.getElementById("frameStyle"),
   targetWidth: document.getElementById("targetWidth"),
+  previewZoom: document.getElementById("previewZoom"),
+  gridMode: document.getElementById("gridMode"),
   autoBridgeIslands: document.getElementById("autoBridgeIslands"),
   weldSupports: document.getElementById("weldSupports"),
   iconSelect: document.getElementById("iconSelect"),
@@ -120,6 +144,7 @@ const ui = {
   supportThicknessValue: document.getElementById("supportThicknessValue"),
   anchorSpreadValue: document.getElementById("anchorSpreadValue"),
   targetWidthValue: document.getElementById("targetWidthValue"),
+  previewZoomValue: document.getElementById("previewZoomValue"),
   iconScaleValue: document.getElementById("iconScaleValue"),
   previewMeta: document.getElementById("previewMeta"),
   iconSelectionStatus: document.getElementById("iconSelectionStatus"),
@@ -134,6 +159,7 @@ const scene = {
   guideLayer: null,
   anchorLayer: null,
   iconLayer: null,
+  gridLayer: null,
   anchorPositions: [],
   dragTarget: null,
   dragOffset: null,
@@ -227,6 +253,7 @@ function updateReadouts() {
   ui.supportThicknessValue.textContent = `${state.supportThickness} px`;
   ui.anchorSpreadValue.textContent = `${state.anchorSpread}%`;
   ui.targetWidthValue.textContent = formatInches(state.targetWidth);
+  ui.previewZoomValue.textContent = `${state.previewZoom}%`;
   ui.iconScaleValue.textContent = `${state.iconScale} px`;
 }
 
@@ -246,6 +273,8 @@ function syncControlsFromState() {
   ui.supportBar.value = state.supportBar ? "on" : "off";
   ui.frameStyle.value = state.frameStyle;
   ui.targetWidth.value = state.targetWidth;
+  ui.previewZoom.value = state.previewZoom;
+  ui.gridMode.value = state.gridMode;
   ui.autoBridgeIslands.checked = state.autoBridgeIslands;
   ui.weldSupports.checked = state.weldSupports;
   ui.iconScale.value = state.iconScale;
@@ -282,6 +311,67 @@ function ensureCanvasSize() {
   }
 
   setPreviewMeta(`Canvas ${width} x ${height} px. ${scene.outlineFontReady ? "Outline font ready." : "Preview mode active."}`);
+}
+
+function drawScaleGrid(itemBounds) {
+  if (state.gridMode === "off" || !itemBounds || !itemBounds.width || !itemBounds.height) {
+    scene.gridLayer = null;
+    return;
+  }
+
+  const inchStep = state.gridMode === "half-inch" ? 0.5 : 1;
+  const pxPerInch = itemBounds.width / Math.max(state.targetWidth, 0.1);
+  const spacing = pxPerInch * inchStep;
+  if (!Number.isFinite(spacing) || spacing < 18) {
+    scene.gridLayer = null;
+    return;
+  }
+
+  const bounds = paper.view.bounds;
+  const lines = [];
+  const labels = [];
+
+  const startX = itemBounds.left - (Math.floor((itemBounds.left - bounds.left) / spacing) + 1) * spacing;
+  for (let x = startX; x <= bounds.right + spacing; x += spacing) {
+    lines.push(
+      new paper.Path.Line({
+        from: new paper.Point(x, bounds.top),
+        to: new paper.Point(x, bounds.bottom),
+        strokeColor: "rgba(36, 24, 15, 0.08)",
+        strokeWidth: 1,
+      })
+    );
+  }
+
+  const startY = itemBounds.top - (Math.floor((itemBounds.top - bounds.top) / spacing) + 1) * spacing;
+  for (let y = startY; y <= bounds.bottom + spacing; y += spacing) {
+    lines.push(
+      new paper.Path.Line({
+        from: new paper.Point(bounds.left, y),
+        to: new paper.Point(bounds.right, y),
+        strokeColor: "rgba(36, 24, 15, 0.08)",
+        strokeWidth: 1,
+      })
+    );
+  }
+
+  for (let index = 0; index <= state.targetWidth; index += inchStep) {
+    const x = itemBounds.left + pxPerInch * index;
+    if (x > bounds.right) {
+      break;
+    }
+    labels.push(
+      new paper.PointText({
+        point: new paper.Point(x + 4, bounds.top + 18),
+        content: `${index}${inchStep === 1 ? '"' : ""}`,
+        fillColor: "#8b6d50",
+        fontSize: 11,
+      })
+    );
+  }
+
+  const layer = new paper.Group({ children: [...lines, ...labels] });
+  scene.gridLayer = layer;
 }
 
 function withTimeout(promise, timeoutMs, message) {
@@ -1044,8 +1134,9 @@ function buildSupports(textBounds) {
 function fitItemIntoView(item) {
   const viewBounds = paper.view.bounds;
   const previewScaleFactor = clamp(state.targetWidth / 7, 0.72, 1.28);
-  const usableWidth = viewBounds.width * 0.86 * previewScaleFactor;
-  const usableHeight = viewBounds.height * 0.82 * previewScaleFactor;
+  const zoomFactor = state.previewZoom / 100;
+  const usableWidth = viewBounds.width * 0.86 * previewScaleFactor * zoomFactor;
+  const usableHeight = viewBounds.height * 0.82 * previewScaleFactor * zoomFactor;
   const sourceBounds = item.bounds;
   const scale = Math.min(usableWidth / sourceBounds.width, usableHeight / sourceBounds.height);
   item.scale(scale);
@@ -1286,6 +1377,7 @@ function renderScene() {
     }
 
     fitItemIntoView(textArtwork);
+    drawScaleGrid(textArtwork.bounds);
     const textBounds = textArtwork.bounds.clone();
     const frameArtwork = buildFrame(textBounds, state.supportThickness);
     const supports = buildSupports(textBounds);
@@ -1329,6 +1421,9 @@ function renderScene() {
 
     welded.fillColor = "#1d130d";
     welded.strokeColor = null;
+    if (scene.gridLayer) {
+      attachToLayer(scene.gridLayer);
+    }
     attachToLayer(welded);
     attachToLayer(supports.guides);
     supports.guides.insertBelow(welded);
