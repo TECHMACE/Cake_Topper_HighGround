@@ -1022,12 +1022,15 @@ function buildSupports(textBounds) {
 
 function fitItemIntoView(item) {
   const viewBounds = paper.view.bounds;
-  const usableWidth = viewBounds.width * 0.78;
-  const usableHeight = viewBounds.height * 0.66;
+  const usableWidth = viewBounds.width * 0.86;
+  const usableHeight = viewBounds.height * 0.82;
   const sourceBounds = item.bounds;
   const scale = Math.min(usableWidth / sourceBounds.width, usableHeight / sourceBounds.height);
   item.scale(scale);
-  item.position = new paper.Point(viewBounds.center.x, viewBounds.center.y - 20);
+  const topPadding = viewBounds.height * 0.07;
+  const scaledBounds = item.bounds;
+  const targetCenterY = viewBounds.top + topPadding + scaledBounds.height / 2;
+  item.position = new paper.Point(viewBounds.center.x, targetCenterY);
 }
 
 function drawAnchorHandles() {
