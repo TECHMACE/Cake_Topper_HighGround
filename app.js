@@ -1,3 +1,32 @@
+const bootstrapUi = {
+  fontStatus: document.getElementById("fontStatus"),
+  connectionStatus: document.getElementById("connectionStatus"),
+  previewMeta: document.getElementById("previewMeta"),
+};
+
+function bootstrapFailure(message) {
+  if (bootstrapUi.fontStatus) {
+    bootstrapUi.fontStatus.textContent = "Dependency load failed";
+    bootstrapUi.fontStatus.style.background = "rgba(150, 44, 32, 0.14)";
+    bootstrapUi.fontStatus.style.color = "#8b1e1e";
+  }
+  if (bootstrapUi.connectionStatus) {
+    bootstrapUi.connectionStatus.textContent = message;
+    bootstrapUi.connectionStatus.classList.remove("neutral");
+    bootstrapUi.connectionStatus.style.background = "rgba(150, 44, 32, 0.14)";
+    bootstrapUi.connectionStatus.style.color = "#8b1e1e";
+  }
+  if (bootstrapUi.previewMeta) {
+    bootstrapUi.previewMeta.textContent = message;
+  }
+}
+
+if (!window.paper || !window.opentype) {
+  bootstrapFailure(
+    window.__topperDependencyError ||
+      "Required browser libraries did not load. This usually means the CDN request was blocked."
+  );
+} else {
 paper.install(window);
 paper.setup("previewCanvas");
 
@@ -1479,3 +1508,4 @@ async function initialize() {
 }
 
 initialize();
+}
