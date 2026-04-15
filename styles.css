@@ -234,6 +234,11 @@ small {
   line-height: 1.45;
 }
 
+#previewMeta {
+  margin-top: 8px;
+  max-width: 46ch;
+}
+
 .metric-box {
   display: flex;
   flex-direction: column;

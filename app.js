@@ -50,6 +50,7 @@ const fontCache = new Map();
 const BUILTIN_FONT_KEYS = Object.keys(FONT_LIBRARY);
 
 const ui = {
+  previewCanvas: document.getElementById("previewCanvas"),
   messageInput: document.getElementById("messageInput"),
   fontSelect: document.getElementById("fontSelect"),
   fontUpload: document.getElementById("fontUpload"),
@@ -84,6 +85,7 @@ const ui = {
   supportThicknessValue: document.getElementById("supportThicknessValue"),
   targetWidthValue: document.getElementById("targetWidthValue"),
   iconScaleValue: document.getElementById("iconScaleValue"),
+  previewMeta: document.getElementById("previewMeta"),
 };
 
 const scene = {
@@ -101,6 +103,10 @@ const scene = {
 
 const tool = new paper.Tool();
 let fontLoadRequestId = 0;
+
+function setPreviewMeta(message) {
+  ui.previewMeta.textContent = message;
+}
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -183,6 +189,25 @@ function syncControlsFromState() {
 
 function clearCanvas() {
   paper.project.activeLayer.removeChildren();
+}
+
+function ensureCanvasSize() {
+  const rect = ui.previewCanvas.getBoundingClientRect();
+  const width = Math.max(Math.round(rect.width), 640);
+  const height = Math.max(Math.round(rect.height), 420);
+
+  if (ui.previewCanvas.width !== width) {
+    ui.previewCanvas.width = width;
+  }
+  if (ui.previewCanvas.height !== height) {
+    ui.previewCanvas.height = height;
+  }
+
+  if (paper.view.viewSize.width !== width || paper.view.viewSize.height !== height) {
+    paper.view.viewSize = new paper.Size(width, height);
+  }
+
+  setPreviewMeta(`Canvas ${width} x ${height} px. ${scene.outlineFontReady ? "Outline font ready." : "Preview mode active."}`);
 }
 
 function withTimeout(promise, timeoutMs, message) {
@@ -1070,6 +1095,7 @@ function buildFrameConnectors(textArtwork, frameArtwork, thickness) {
 
 function renderFallback(message) {
   clearCanvas();
+  ensureCanvasSize();
   new paper.PointText({
     point: paper.view.center,
     content: message,
@@ -1082,6 +1108,7 @@ function renderFallback(message) {
 
 function renderPreviewOnlyText() {
   clearCanvas();
+  ensureCanvasSize();
   const lines = (state.message || "Happy Birthday")
     .split("\n")
     .map((line) => line.trim())
@@ -1116,11 +1143,13 @@ function renderPreviewOnlyText() {
   const scale = Math.min(usableWidth / Math.max(sourceBounds.width, 1), usableHeight / Math.max(sourceBounds.height, 1));
   group.scale(scale);
   group.position = new paper.Point(viewBounds.center.x, viewBounds.center.y - 24);
+  setPreviewMeta(`Canvas ${Math.round(viewBounds.width)} x ${Math.round(viewBounds.height)} px. Showing preview text without export outlines.`);
   return group;
 }
 
 function renderScene() {
   try {
+    ensureCanvasSize();
     clearCanvas();
 
     const textArtwork = buildTextArtwork();
@@ -1130,7 +1159,11 @@ function renderScene() {
       scene.silhouettePreview = previewGroup;
       updatePhysicalSize(previewGroup ? previewGroup.bounds : null);
       setStatus(ui.connectionStatus, "Preview only: upload a font for export-ready outlines", "warn");
+      setPreviewMeta(
+        `Canvas ${Math.round(paper.view.bounds.width)} x ${Math.round(paper.view.bounds.height)} px. Remote font unavailable, fallback preview shown.`
+      );
       paper.view.update();
+      paper.view.draw();
       return;
     }
 
@@ -1192,10 +1225,17 @@ function renderScene() {
     updateConnectionStatus(islandCount, bridgesAdded);
     const readiness = assessCutReadiness(scene.artworkForExport.bounds, islandCount);
     setStatus(ui.connectionStatus, `${ui.connectionStatus.textContent} • ${readiness.message}`, readiness.tone);
+    setPreviewMeta(
+      `Canvas ${Math.round(paper.view.bounds.width)} x ${Math.round(paper.view.bounds.height)} px. Rendered topper bounds ${Math.round(
+        scene.artworkForExport.bounds.width
+      )} x ${Math.round(scene.artworkForExport.bounds.height)} px.`
+    );
     paper.view.update();
+    paper.view.draw();
   } catch (error) {
     console.error(error);
     setStatus(ui.connectionStatus, "Preview error", "error");
+    setPreviewMeta(`Render failed: ${error.message || "Unknown error"}`);
     renderFallback("Preview failed. See status above.");
   }
 }
@@ -1423,12 +1463,16 @@ function bindEvents() {
   ui.resetAnchorsBtn.addEventListener("click", resetAnchors);
   ui.downloadBtn.addEventListener("click", downloadSvg);
 
-  window.addEventListener("resize", () => renderScene());
+  window.addEventListener("resize", () => {
+    ensureCanvasSize();
+    renderScene();
+  });
 }
 
 async function initialize() {
   syncControlsFromState();
   bindEvents();
+  ensureCanvasSize();
   renderScene();
   await ensureFont(state.fontKey);
   renderScene();
